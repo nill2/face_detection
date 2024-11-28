@@ -1,0 +1,53 @@
+name: Deploy to Google Cloud
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: ["Upload Python Package"] 
+  
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Set up Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v0
+        with:
+          version: '343.0.0'
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS }}
+          PROJECT_ID: smooth-verve-400915
+
+      - name: Configure Docker
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.7'
+
+      - name: Pull Docker image
+        run: |
+          docker pull nill2/ftptomongo:latest
+          docker tag nill2/ftptomongo:latest gcr.io/smooth-verve-400915/nill2/ftptomongo:latest
+          echo ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS }} | gcloud auth activate-service-account --key-file=-
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS }}
+
+      - name: Configure Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v0
+        with:
+          version: '343.0.0'
+        env:
+          PROJECT_ID: smooth-verve-400915
+
+      - name: Deploy image to Google Cloud Run
+        run: |
+          gcloud run deploy ftptomongo-cluster \
+            --image gcr.io/smooth-verve-400915/nill2/ftptomongo:latest \
+            --platform managed \
+            --region europe-west4 \
+            --port=${{secrets.FTP_PORT}}} \
+            --allow-unauthenticated
+          

@@ -1,0 +1,12 @@
+name: image-processor
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pymongo>=4.0.0
+  - opencv-python>=4.5.0
+  - numpy>=1.21.0
+  - python-dotenv>=1.0.0
+  - pip
+  - pip:
+      - flask
