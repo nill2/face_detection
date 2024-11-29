@@ -13,56 +13,38 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       max-parallel: 5
-      matrix: 
+      matrix:
         version: [1]
 
     steps:
-      - name: defauld directory
+      - name: Default directory
         run: |
           echo "CurrentDirectory=$(pwd)" >> $GITHUB_ENV
 
       - name: Checkout Code
         uses: actions/checkout@v3
 
-      - name: Install Miniconda and update dependencies
-        run: |
-          wget https://repo.anaconda.com/miniconda/Miniconda3-py38_4.9.2-Linux-x86_64.sh -O miniconda.sh
-          bash miniconda.sh -b -p $HOME/miniconda
-          source "$HOME/miniconda/etc/profile.d/conda.sh"
-          conda activate base
-          conda config --set always_yes yes --set changeps1 no
-          conda update -q conda
-          conda env update --file environment.yml --name base
-        env:
-          CONDA_HOME: $HOME/miniconda
-
       - name: Set up Python 3.10
         uses: actions/setup-python@v3
         with:
           python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
       - name: Set up packages
         uses: nill2/gha/install-packages@main
-  
+
       - name: Lint with flake8 and pylint
         uses: nill2/gha/lint@main
 
-      - name: Set up MongoDB
-        run: |
-          docker run -d --name mongodb -p 27017:27017 mongo:latest
-          sleep 10  # Wait for MongoDB to start
-        timeout-minutes: 3
-
-      #- name: tests
-      #  uses: nill2/gha/run-tests@main
-      #  with:
-      #    IS_TEST: "GHA"
-      #    MONGO_HOST: ${{ secrets.MONGO_HOST }}
-      #    FTP_USER: ${{ secrets.FTP_USER }}
-      #    FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
-      #    AWS_SECRET_KEY: ${{ secrets.AWS_SECRET_KEY }}
-      #    AWS_ACCESS_KEY: ${{ secrets.AWS_ACCESS_KEY }}
-      #    UNIT_TEST: 'Yes'
-      #    E2E_TEST: 'Yes'
+      #- name: Set up MongoDB
+      #  run: |
+      #    docker run -d --name mongodb -p 27017:27017 mongo:latest
+      #    sleep 10  # Wait for MongoDB to start
+      #  timeout-minutes: 3
 
       #- name: Test unit tests with pytest
       #  env:
@@ -70,12 +52,12 @@ jobs:
       #    MONGO_HOST: ${{ secrets.MONGO_HOST }}
       #    FTP_USER: ${{ secrets.FTP_USER }}
       #    FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
-      #    FTP_PORT: ${{ secrets.FTP_PORT }}    
+      #    FTP_PORT: ${{ secrets.FTP_PORT }}
       #    AWS_SECRET_KEY: ${{ secrets.AWS_SECRET_KEY }}
       #    AWS_ACCESS_KEY: ${{ secrets.AWS_ACCESS_KEY }} 
       #  run: |
       #    cd $CurrentDirectory
-      #    pytest  './tests/test_unit.py'
+      #    pytest './tests/test_unit.py'
 
       #- name: Test e2e tests with pytest
       #  env:
@@ -86,4 +68,4 @@ jobs:
       #    AWS_SECRET_KEY: ${{ secrets.AWS_SECRET_KEY }}
       #    AWS_ACCESS_KEY: ${{ secrets.AWS_ACCESS_KEY }}
       #  run: |
-      #    pytest  './tests/test_core.py'
+      #    pytest './tests/test_core.py'
