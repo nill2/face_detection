@@ -39,23 +39,23 @@ class PhotoProcessor:
             logger.error("Failed to connect to MongoDB: %s", connection_error)
             return None
 
-    def delete_old_faces(self,face_collection):
+    def delete_old_faces(self, face_collection):
         """
         Deletes old photos from the specified collection based on the FACES_HISTORY_DAYS setting.
         """
         try:
             # Convert FACES_HISTORY_DAYS to seconds
             time_threshold = time.time() - (FACES_HISTORY_DAYS * 86400)  # Convert days to seconds
-            
+
             # Construct query to delete documents with a date field older than the threshold
             query = {"date": {"$lt": time_threshold}}
-            
+
             # Perform the deletion
             result = face_collection.delete_many(query)
-            
+
             # Log the number of deleted documents
-            logger.info(f"Deleted {result.deleted_count} old photos from MongoDB.")
-        
+            logger.info("Deleted  old photos from MongoDB: %s", result.deleted_count)
+
         except PyMongoError as e:
             logger.error("Error deleting old photos from MongoDB: %s", e)
 
@@ -68,9 +68,8 @@ class PhotoProcessor:
             # Convert the image data to an image array
             image_array = np.frombuffer(image_data, np.uint8)
             image = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
-            
-            image = cv2.fastNlMeansDenoisingColored(image, None, 10, 10, 7, 21)
 
+            image = cv2.fastNlMeansDenoisingColored(image, None, 10, 10, 7, 21)
 
             # Convert the image to grayscale before applying CLAHE
             gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
@@ -80,7 +79,6 @@ class PhotoProcessor:
             enhanced_image = clahe.apply(gray_image)
 
             face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
-            #face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_profileface.xml')
             faces = face_cascade.detectMultiScale(enhanced_image, scaleFactor=1.05, minNeighbors=3, minSize=(20, 20))
 
             return len(faces) > 0
@@ -131,7 +129,5 @@ class PhotoProcessor:
                 logger.error("MongoDB error while processing photo %s: %s", photo["filename"], e)
             except Exception as e:  # pylint: disable=W0718
                 logger.error("Unexpected error processing photo %s: %s", photo["filename"], e)
-        
+
         self.delete_old_faces(face_collection)
-        
-        
