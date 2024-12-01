@@ -1,0 +1,22 @@
+[tool.poetry]
+name = "face_detection"
+version = "0.1.0"
+description = "A face detection application using OpenCV, MongoDB from my CCTV cam."
+authors = ["Danil Kabanov <danil.d.kabanov@gmail.com>"]
+license = "MIT"
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = ">=3.10,<3.12"
+flask = "^2.3.3"
+opencv-python = "^4.5.0"
+numpy = "^1.21.0"
+pymongo = "^4.0.0"
+python-dotenv = "^1.0.0"
+
+[tool.poetry.extras]
+dev = ["pytest", "flake8", "mypy"]
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"

@@ -5,6 +5,7 @@ __pycache__/
 *$py.class
 *.pyc
 temp_image.jpg
+poetry.lock
 
 # C extensions
 *.so
