@@ -20,6 +20,7 @@ FTP_USER = "user"
 FTP_PASSWORD = "password"
 IS_TEST = ""
 HOURS_KEEP = int(HISTORY)  # time in hours we should keep photos
+FACES_HISTORY_DAYS = int(os.getenv("FACES_HISTORY", "30"))
 
 # Check if the string is empty or not
 if FTP_PORT_STR:
