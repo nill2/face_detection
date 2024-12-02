@@ -30,7 +30,7 @@ import signal
 # Add the project root to PYTHONPATH
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))  # pylint: disable=C0413
 
-from image_processor.processor import PhotoProcessor  # noqa
+from image_processor.processor import PhotoProcessor    # noqa
 
 # Configure logging
 logging.basicConfig(

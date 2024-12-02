@@ -1,7 +1,8 @@
-# image_processor/__init__.py
+"""
+This module initializes the package and provides access to its main functionality.
+"""
 
 from .processor import PhotoProcessor
-from .config import Config
 
 # Optionally, you can define an `__all__` list to control what gets imported
-__all__ = ["PhotoProcessor", "Config"]
+__all__ = ["PhotoProcessor"]

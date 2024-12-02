@@ -1,7 +1,9 @@
-# face_detection/__init__.py
+"""
+This module initializes the package and provides access to its main functionality.
+"""
 
-from .image_processor import PhotoProcessor, Config
-from .main import run_application
+from .image_processor.processor import PhotoProcessor
+from .main import main_loop
 
 # Optionally, define `__all__` to specify what is publicly available
-__all__ = ["PhotoProcessor", "Config", "run_application"]
+__all__ = ["PhotoProcessor", "main_loop"]
