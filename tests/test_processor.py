@@ -24,12 +24,16 @@ Test Flow:
 - Read real test images for processing and face detection validation.
 
 Tested Methods:
-1. test_connect_to_mongodb_success: Tests a successful connection to MongoDB and ensures the correct collection is returned.
-2. test_connect_to_mongodb_failure: Simulates a connection failure and ensures that the method handles it gracefully by returning None.
-3. test_delete_old_faces: Verifies that the method for deleting old face records from MongoDB works as expected.
-4. test_detect_faces: Simulates face detection in both mock images and real images. Ensures that face detection logic functions properly.
-5. test_process_photos: Tests the full process of photo handling, including detection of faces and storing of results in MongoDB.
-
+1. test_connect_to_mongodb_success: Tests a successful connection to MongoDB
+and ensures the correct collection is returned.
+2. test_connect_to_mongodb_failure: Simulates a connection failure and ensures
+that the method handles it gracefully by returning None.
+3. test_delete_old_faces: Verifies that the method for deleting old face records
+from MongoDB works as expected.
+4. test_detect_faces: Simulates face detection in both mock images and real images.
+Ensures that face detection logic functions properly.
+5. test_process_photos: Tests the full process of photo handling,
+including detection of faces and storing of results in MongoDB.
 """
 
 import unittest
