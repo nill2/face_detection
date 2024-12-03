@@ -6,6 +6,8 @@ __pycache__/
 *.pyc
 temp_image.jpg
 poetry.lock
+.myenv/
+myenv
 
 # C extensions
 *.so
