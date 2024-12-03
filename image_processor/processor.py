@@ -8,6 +8,7 @@ from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure, PyMongoError
 import numpy as np  # pylint: disable=E0401
 import cv2  # pylint: disable=E0401
+from pymongo import DESCENDING
 from .config import MONGO_HOST, MONGO_PORT, MONGO_DB, MONGO_COLLECTION, FACE_COLLECTION, ERROR_LVL, FACES_HISTORY_DAYS
 
 # Logger configuration
@@ -69,6 +70,12 @@ class PhotoProcessor:
             image_array = np.frombuffer(image_data, np.uint8)
             image = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
 
+            # Ensure the image is valid
+            if image is None or len(image.shape) != 3:
+                logger.error("Invalid image data provided for face detection.")
+                return False
+
+            # Apply denoising and grayscale conversion
             image = cv2.fastNlMeansDenoisingColored(image, None, 10, 10, 7, 21)
 
             # Convert the image to grayscale before applying CLAHE
@@ -103,7 +110,7 @@ class PhotoProcessor:
             return
 
         query = {"date": {"$gt": self.latest_processed_date}}
-        photos = list(main_collection.find(query).sort("date", -1))
+        photos = list(main_collection.find(query).sort("date", DESCENDING))
 
         for photo in photos:
             try:
