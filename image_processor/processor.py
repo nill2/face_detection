@@ -4,11 +4,10 @@ Module for processing photos, detecting faces, and storing the results in MongoD
 
 import logging
 import time
-from pymongo import MongoClient
+from pymongo import MongoClient, DESCENDING
 from pymongo.errors import ConnectionFailure, PyMongoError
 import numpy as np  # pylint: disable=E0401
 import cv2  # pylint: disable=E0401
-from pymongo import DESCENDING
 from .config import MONGO_HOST, MONGO_PORT, MONGO_DB, MONGO_COLLECTION, FACE_COLLECTION, ERROR_LVL, FACES_HISTORY_DAYS
 
 # Logger configuration
