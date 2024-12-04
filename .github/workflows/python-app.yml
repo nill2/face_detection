@@ -58,6 +58,7 @@ jobs:
           AWS_ACCESS_KEY: ${{ secrets.AWS_ACCESS_KEY }} 
         run: |
           cd $CurrentDirectory
+          python setuptstmongo.py
           python -m unittest discover -s tests
 
       #- name: Test e2e tests with pytest
