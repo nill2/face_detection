@@ -41,11 +41,11 @@ jobs:
       - name: Lint with flake8 and pylint
         uses: nill2/gha/lint@main
 
-      #- name: Set up MongoDB
-      #  run: |
-      #    docker run -d --name mongodb -p 27017:27017 mongo:latest
-      #    sleep 10  # Wait for MongoDB to start
-      #  timeout-minutes: 3
+      - name: Set up MongoDB
+        run: |
+          docker run -d --name mongodb -p 27017:27017 mongo:latest
+          sleep 10  # Wait for MongoDB to start
+        timeout-minutes: 3
 
       - name: Test unit tests with unittest
         env:
