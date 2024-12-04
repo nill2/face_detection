@@ -49,7 +49,7 @@ jobs:
 
       - name: Test unit tests with unittest
         env:
-          IS_TEST: "GHA"
+          IS_TEST: "test"
           MONGO_HOST: ${{ secrets.MONGO_HOST }}
           FTP_USER: ${{ secrets.FTP_USER }}
           FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
