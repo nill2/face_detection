@@ -41,24 +41,25 @@ jobs:
       - name: Lint with flake8 and pylint
         uses: nill2/gha/lint@main
 
-      #- name: Set up MongoDB
-      #  run: |
-      #    docker run -d --name mongodb -p 27017:27017 mongo:latest
-      #    sleep 10  # Wait for MongoDB to start
-      #  timeout-minutes: 3
+      - name: Set up MongoDB
+        run: |
+          docker run -d --name mongodb -p 27017:27017 mongo:latest
+          sleep 10  # Wait for MongoDB to start
+        timeout-minutes: 3
 
-      #- name: Test unit tests with pytest
-      #  env:
-      #    IS_TEST: "GHA"
-      #    MONGO_HOST: ${{ secrets.MONGO_HOST }}
-      #    FTP_USER: ${{ secrets.FTP_USER }}
-      #    FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
-      #    FTP_PORT: ${{ secrets.FTP_PORT }}
-      #    AWS_SECRET_KEY: ${{ secrets.AWS_SECRET_KEY }}
-      #    AWS_ACCESS_KEY: ${{ secrets.AWS_ACCESS_KEY }} 
-      #  run: |
-      #    cd $CurrentDirectory
-      #    pytest './tests/test_unit.py'
+      - name: Test unit tests with unittest
+        env:
+          IS_TEST: "GHA"
+          MONGO_HOST: ${{ secrets.MONGO_HOST }}
+          FTP_USER: ${{ secrets.FTP_USER }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+          FTP_PORT: ${{ secrets.FTP_PORT }}
+          AWS_SECRET_KEY: ${{ secrets.AWS_SECRET_KEY }}
+          AWS_ACCESS_KEY: ${{ secrets.AWS_ACCESS_KEY }} 
+        run: |
+          cd $CurrentDirectory
+          python ./tests/setuptstmongo.py
+          python -m unittest discover -s tests
 
       #- name: Test e2e tests with pytest
       #  env:
