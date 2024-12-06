@@ -30,6 +30,17 @@ repos:
         pass_filenames: false # Ignore filenames passed by pre-commit
         files: ^(face_detection|image_processor)/.*\.py$ # Match specific directories
 
+  #  - repo: https://github.com/conventional-changelog/commitlint
+  #    rev: v17.0.0  # Or any stable version
+  - repo: local
+    hooks:
+      - id: commitlint
+        name: commitlint
+        entry: npx --no-install commitlint --edit .git/COMMIT_EDITMSG
+        language: node
+        stages: [commit-msg]
+        pass_filenames: false
+
   - repo: https://github.com/psf/black
     rev: 24.10.0
     hooks:
