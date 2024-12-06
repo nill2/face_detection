@@ -1,0 +1,42 @@
+# bandit.yml configuration file
+
+# The severity levels for the Bandit issues
+# Possible values: LOW, MEDIUM, HIGH
+# If set to 'NONE', will ignore that severity level
+severity:
+  LOW: true
+  MEDIUM: true
+  HIGH: true
+
+# Disabling specific Bandit tests
+# You can disable specific tests by their ID
+# The rule IDs can be found in Bandit documentation or Bandit output
+disable:
+  - B101 # Disables the test for detecting the use of 'open' without 'with'
+  - B301 # Disables the test for using 'eval'
+  - B602 # Disables the test for using assert statements with only one argument
+  - B105
+
+# Enabling specific tests
+# Enable tests that are disabled by default
+enable:
+  - B503 # Enable the test for use of subprocess with shell=True
+
+# Configuring Bandit to run in specific directories
+# You can specify directories or files you want Bandit to focus on.
+# This is especially useful for excluding specific directories
+exclude:
+  - tests/
+  - migrations/
+  - venv/
+  - myenv/
+  - node_modules/
+  - .mypy_cache/
+
+# Output settings
+output:
+  format: json # Options: json, txt, html, or markdown
+  file: bandit-report.json # Save the report to a file
+
+# Running Bandit in "experimental" mode enables extra, less stable checks
+experimental: false # Set to true if you want to enable experimental checks

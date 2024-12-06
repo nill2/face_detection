@@ -34,8 +34,7 @@ from image_processor.processor import PhotoProcessor  # noqa
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
@@ -44,16 +43,14 @@ should_run = [True]
 
 
 def signal_handler(_, __, should_run_flag):
-    """
-    Handles termination signals to gracefully shut down the program.
-    """
+    """Handle termination signals to gracefully shut down the program."""
     logger.info("Termination signal received. Shutting down...")
     should_run_flag[0] = False
 
 
 def main_loop(interval=30):
     """
-    Runs the process_photos function periodically.
+    Run the process_photos function periodically.
 
     Args:
         interval (int): The interval in seconds between processing runs (default is 30 seconds).
@@ -74,8 +71,12 @@ def main_loop(interval=30):
 
 if __name__ == "__main__":
     # Register the signal handler for SIGINT (Ctrl+C) and SIGTERM
-    signal.signal(signal.SIGINT, lambda signum, frame: signal_handler(signum, frame, should_run))
-    signal.signal(signal.SIGTERM, lambda signum, frame: signal_handler(signum, frame, should_run))
+    signal.signal(
+        signal.SIGINT, lambda signum, frame: signal_handler(signum, frame, should_run)
+    )
+    signal.signal(
+        signal.SIGTERM, lambda signum, frame: signal_handler(signum, frame, should_run)
+    )
 
     logger.info("Starting the image processing service...")
     main_loop()

@@ -1,51 +1,76 @@
-"""
-Module for processing photos, detecting faces, and storing the results in MongoDB.
-"""
+"""Module for processing photos, detecting faces, and storing the results in MongoDB."""
 
 import logging
 import time
-from pymongo import MongoClient, DESCENDING
-from pymongo.errors import ConnectionFailure, PyMongoError
+from pymongo import MongoClient, DESCENDING  # pylint: disable=E0401
+from pymongo.errors import ConnectionFailure, PyMongoError  # pylint: disable=E0401
+from pymongo.collection import Collection
 import numpy as np  # pylint: disable=E0401
 import cv2  # pylint: disable=E0401
-from .config import MONGO_HOST, MONGO_PORT, MONGO_DB, MONGO_COLLECTION, FACE_COLLECTION, ERROR_LVL, FACES_HISTORY_DAYS
+from .config import (  # pylint: disable=E0402
+    MONGO_HOST,
+    MONGO_PORT,
+    MONGO_DB,
+    MONGO_COLLECTION,
+    FACE_COLLECTION,
+    ERROR_LVL,
+    FACES_HISTORY_DAYS,
+)
 
 # Logger configuration
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
 logger = logging.getLogger(__name__)
 
 
 class PhotoProcessor:
-    """
-    Class responsible for processing photos, detecting faces using OpenCV,
-    and storing the results in a MongoDB database.
-    """
+    """Process photos, detect faces using OpenCV, and store results in MongoDB."""
 
-    def __init__(self):
-        self.latest_processed_date = None
+    def __init__(self) -> None:
+        """Initialize the photo processor."""
+        self.latest_processed_date: int = 0
 
-    def connect_to_mongodb(self, db_name, collection_name):
+    def connect_to_mongodb(self, db_name: str, collection_name: str) -> Collection:
         """
-        Connects to a MongoDB instance and returns a collection object.
+        Connect to MongoDB and return the collection.
+
+        Arguments:
+            db_name: The name of the database.
+            collection_name: The name of the collection.
+
+        Returns:
+            The MongoDB collection object.
         """
         try:
             client = MongoClient(MONGO_HOST, MONGO_PORT)
-            db = client[db_name]
-            collection = db[collection_name]
+            mongo_db = client[db_name]
+            collection = mongo_db[collection_name]
             if ERROR_LVL == "debug":
-                logger.info("Connected to MongoDB: %s:%s/%s/%s", MONGO_HOST, MONGO_PORT, db_name, collection_name)
+                logger.info(
+                    "Connected to MongoDB: %s:%s/%s/%s",
+                    MONGO_HOST,
+                    MONGO_PORT,
+                    db_name,
+                    collection_name,
+                )
             return collection
         except ConnectionFailure as connection_error:
             logger.error("Failed to connect to MongoDB: %s", connection_error)
             return None
 
-    def delete_old_faces(self, face_collection):
+    def delete_old_faces(self, face_collection: Collection) -> None:
         """
-        Deletes old photos from the specified collection based on the FACES_HISTORY_DAYS setting.
+        Delete old photos from the specified collection based on the FACES_HISTORY_DAYS setting.
+
+        Arguments:
+            face_collection: The collection to delete photos from.
         """
         try:
             # Convert FACES_HISTORY_DAYS to seconds
-            time_threshold = time.time() - (FACES_HISTORY_DAYS * 86400)  # Convert days to seconds
+            time_threshold = time.time() - (
+                FACES_HISTORY_DAYS * 86400
+            )  # Convert days to seconds
 
             # Construct query to delete documents with a date field older than the threshold
             query = {"date": {"$lt": time_threshold}}
@@ -54,15 +79,20 @@ class PhotoProcessor:
             result = face_collection.delete_many(query)
 
             # Log the number of deleted documents
-            logger.info("Deleted  old photos from MongoDB: %s", result.deleted_count)
+            logger.info("Deleted old photos from MongoDB: %s", result.deleted_count)
 
-        except PyMongoError as e:
-            logger.error("Error deleting old photos from MongoDB: %s", e)
+        except PyMongoError as error:
+            logger.error("Error deleting old photos from MongoDB: %s", error)
 
-    def detect_faces(self, image_data):
+    def detect_faces(self, image_data: bytes) -> bool:
         """
-        Detects faces in the given image data using OpenCV.
-        Returns True if faces are detected, False otherwise.
+        Detect faces in the given image data using OpenCV.
+
+        Arguments:
+            image_data: The image data in byte format.
+
+        Returns:
+            True if faces are detected, False otherwise.
         """
         try:
             # Convert the image data to an image array
@@ -84,19 +114,20 @@ class PhotoProcessor:
             clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
             enhanced_image = clahe.apply(gray_image)
 
-            face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
-            faces = face_cascade.detectMultiScale(enhanced_image, scaleFactor=1.05, minNeighbors=3, minSize=(20, 20))
+            face_cascade = cv2.CascadeClassifier(
+                cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+            )
+            faces = face_cascade.detectMultiScale(
+                enhanced_image, scaleFactor=1.05, minNeighbors=3, minSize=(20, 20)
+            )
 
             return len(faces) > 0
-        except cv2.error as e:
-            logger.error("Error during face detection: %s", e)
+        except cv2.error as error:
+            logger.error("Error during face detection: %s", error)
             return False
 
-    def process_photos(self):
-        """
-        Processes photos from the main MongoDB collection, checks for faces,
-        and copies photos with faces to a separate MongoDB collection.
-        """
+    def process_photos(self) -> None:
+        """Process photos from MongoDB, check for faces, and copy photos with faces to a separate collection."""
         if self.latest_processed_date is None:
             self.latest_processed_date = 0
             # Logic to set latest processed date from MongoDB
@@ -113,27 +144,50 @@ class PhotoProcessor:
 
         for photo in photos:
             try:
-                logger.info("Processing photo: %s with date %s", photo["filename"], photo["bsonTime"])
+                logger.info(
+                    "Processing photo: %s with date %s",
+                    photo["filename"],
+                    photo["bsonTime"],
+                )
                 image_data = photo["data"]
 
                 if self.detect_faces(image_data):
-                    face_collection.insert_one({
-                        "filename": photo["filename"],
-                        "data": image_data,
-                        "s3_file_url": photo.get("s3_file_url", ""),
-                        "size": photo["size"],
-                        "date": photo["date"],
-                        "bsonTime": photo["bsonTime"]
-                    })
-                    logger.info("Face detected in %s. Photo copied to face collection.", photo["filename"])
+                    face_collection.insert_one(
+                        {
+                            "filename": photo["filename"],
+                            "data": image_data,
+                            "s3_file_url": photo.get("s3_file_url", ""),
+                            "size": photo["size"],
+                            "date": photo["date"],
+                            "bsonTime": photo["bsonTime"],
+                        }
+                    )
+                    logger.info(
+                        "Face detected in %s. Photo copied to face collection.",
+                        photo["filename"],
+                    )
 
-                self.latest_processed_date = max(photo["date"], self.latest_processed_date)
+                self.latest_processed_date = max(
+                    photo["date"], self.latest_processed_date
+                )
 
-            except cv2.error as e:
-                logger.error("Error with OpenCV while processing photo %s: %s", photo["filename"], e)
-            except PyMongoError as e:  # Using the imported PyMongoError for MongoDB-related exceptions
-                logger.error("MongoDB error while processing photo %s: %s", photo["filename"], e)
-            except Exception as e:  # pylint: disable=W0718
-                logger.error("Unexpected error processing photo %s: %s", photo["filename"], e)
+            except cv2.error as error:
+                logger.error(
+                    "Error with OpenCV while processing photo %s: %s",
+                    photo["filename"],
+                    error,
+                )
+            except (
+                PyMongoError
+            ) as error:  # Using the imported PyMongoError for MongoDB-related exceptions
+                logger.error(
+                    "MongoDB error while processing photo %s: %s",
+                    photo["filename"],
+                    error,
+                )
+            except Exception as error:  # Handle any other exceptions
+                logger.error(
+                    "Unexpected error processing photo %s: %s", photo["filename"], error
+                )
 
         self.delete_old_faces(face_collection)
