@@ -1,10 +1,10 @@
 name: ci:publish docker image
 on:
-    push:
-      branches:
-        - main
-    workflow_dispatch:
-        
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
 jobs:
   docker:
     runs-on: ubuntu-latest
@@ -78,6 +78,3 @@ jobs:
             SECRET_FTP_PORT=${{ secrets.FTP_PORT }}
             AWS_SECRET_KEY: ${{ secrets.AWS_SECRET_KEY }}
             AWS_ACCESS_KEY: ${{ secrets.AWS_ACCESS_KEY }}
-      
-       
-            

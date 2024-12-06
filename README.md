@@ -32,24 +32,24 @@ A Python application for processing images, detecting faces using OpenCV, and st
 
 2. **Set Up Environment**
 
-    ```bash
-    python3 -m venv venv
-    source venv/bin/activate  # On Windows: .\venv\Scripts\activate
-    pip install -r requirements.txt
-    ```
+   ```bash
+   python3 -m venv venv
+   source venv/bin/activate  # On Windows: .\venv\Scripts\activate
+   pip install -r requirements.txt
+   ```
 
-    using `Conda`
+   using `Conda`
 
-    ```bash
-    conda env create -f environment.yml
-    conda activate image-processor
-    ```
+   ```bash
+   conda env create -f environment.yml
+   conda activate image-processor
+   ```
 
 3. **Run the Application**
 
-    ```bash
-    python main.py
-    ```
+   ```bash
+   python main.py
+   ```
 
 ## File Structure
 
@@ -71,9 +71,9 @@ A Python application for processing images, detecting faces using OpenCV, and st
 
 1. Upload images to the MongoDB collection (MONGO_COLLECTION) via the FTP server or other sources.
 2. The PhotoProcessor will:
-Fetch images from MongoDB.
-Detect faces using OpenCV.
-Store images with detected faces in the FACE_COLLECTION.
+   Fetch images from MongoDB.
+   Detect faces using OpenCV.
+   Store images with detected faces in the FACE_COLLECTION.
 3. Logs will be generated to track processing details.
 
 ## Contributing
