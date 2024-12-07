@@ -10,7 +10,6 @@ on:
 
 jobs:
   commitlint:
-    if: ${{ github.event.pull_request.head.ref != github.event.pull_request.base.ref }} # Skip on merge commit
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -31,10 +30,14 @@ jobs:
 
       - name: Lint commits in the current branch
         run: |
-          COMMITS=$(git log $(git merge-base origin/main HEAD)..HEAD --oneline)
-          if [ -n "$COMMITS" ]; then
-            echo "$COMMITS" | npx commitlint --from=HEAD --to=origin/main
+          if [[ $GITHUB_REF == "refs/heads/main" && $GITHUB_EVENT_NAME == "push" ]]; then
+            echo "Merge commit detected on main, skipping commit lint."
           else
-            echo "No new commits to lint against main. Checking the last commit instead."
-            git log -1 --oneline | npx commitlint
+            COMMITS=$(git log $(git merge-base origin/main HEAD)..HEAD --oneline)
+            if [ -n "$COMMITS" ]; then
+              echo "$COMMITS" | npx commitlint --from=HEAD --to=origin/main
+            else
+              echo "No new commits to lint against main. Checking the last commit instead."
+              git log -1 --oneline | npx commitlint
+            fi
           fi
