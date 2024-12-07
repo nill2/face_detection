@@ -1,0 +1,39 @@
+name: Commit Lint CI
+
+on:
+  push:
+    branches:
+      - "**"
+  pull_request:
+    branches:
+      - "**"
+
+jobs:
+  commitlint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: "18" # Ensure compatibility with commitlint@19.x.x
+
+      - name: Install dependencies
+        run: npm install # Make sure commitlint and its config are installed
+
+      - name: Fetch Git history
+        run: |
+          git fetch --unshallow origin || true
+          git fetch origin main || true
+
+      - name: Lint commits in the current branch
+        run: |
+          COMMITS=$(git log $(git merge-base origin/main HEAD)..HEAD --oneline)
+          if [ -n "$COMMITS" ]; then
+            echo "$COMMITS" | npx commitlint --from=HEAD --to=origin/main
+          else
+            echo "No new commits to lint against main. Checking the last commit instead."
+            git log -1 --oneline | npx commitlint
+          fi
