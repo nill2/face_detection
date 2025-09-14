@@ -9,7 +9,7 @@ poetry.lock
 .myenv/
 myenv
 node_modules/
-image_processor/models/ 
+image_processor/models/
 
 # C extensions
 *.so
