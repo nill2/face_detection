@@ -1,17 +1,17 @@
-"""Module for processing photos, detecting faces, and storing the results in MongoDB."""
+"""Module for processing photos, detecting faces, and storing results in MongoDB."""
 
 import logging
 import time
 from pathlib import Path
 import requests
 from ultralytics import YOLO
-from pymongo import MongoClient, DESCENDING  # pylint: disable=E0401
-from pymongo.errors import ConnectionFailure, PyMongoError  # pylint: disable=E0401
+from pymongo import MongoClient, DESCENDING
+from pymongo.errors import ConnectionFailure, PyMongoError
 from pymongo.collection import Collection
-import numpy as np  # pylint: disable=E0401
-import cv2  # pylint: disable=E0401
+import numpy as np
+import cv2
 
-from .config import (  # pylint: disable=E0402
+from .config import (
     MONGO_HOST,
     MONGO_PORT,
     MONGO_DB,
@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 
 class PhotoProcessor:
-    """Process photos, detect faces using OpenCV or YOLO, and store results in MongoDB."""
+    """Process photos, detect faces using YOLO or OpenCV, and store results in MongoDB."""
 
     def __init__(self) -> None:
         """Initialize the photo processor."""
@@ -39,20 +39,14 @@ class PhotoProcessor:
 
         if FACE_DETECTION_MODEL:
             try:
-                # Ensure models/ folder exists
                 models_dir = Path(__file__).resolve().parent / "models"
                 models_dir.mkdir(parents=True, exist_ok=True)
-
-                # Always use local path inside models/
                 model_path = models_dir / Path(FACE_DETECTION_MODEL).name
 
                 if not model_path.exists():
                     logger.info(
-                        "YOLO model '%s' not found locally. Downloading...",
-                        FACE_DETECTION_MODEL,
+                        "YOLO model '%s' not found locally. Downloading...", FACE_DETECTION_MODEL
                     )
-
-                    # Correct URL for yolov8n-face.pt model
                     url = "https://github.com/akanametov/yolov8-face/releases/download/v0.0.0/yolov8n-face.pt"
                     response = requests.get(url, stream=True, timeout=60)
                     response.raise_for_status()
@@ -61,7 +55,6 @@ class PhotoProcessor:
                             f.write(chunk)
                     logger.info("YOLO model downloaded to %s", model_path)
 
-                # Load model from local path
                 self.face_model = YOLO(str(model_path))
                 logger.info("YOLO model loaded successfully from %s", model_path)
 
@@ -93,7 +86,7 @@ class PhotoProcessor:
             return None
 
     def delete_old_faces(self, face_collection: Collection) -> None:
-        """Delete old photos from the specified collection based on FACES_HISTORY_DAYS."""
+        """Delete old photos from the collection based on FACES_HISTORY_DAYS."""
         try:
             time_threshold = time.time() - (FACES_HISTORY_DAYS * 86400)
             query = {"date": {"$lt": time_threshold}}
@@ -102,44 +95,48 @@ class PhotoProcessor:
         except PyMongoError as error:
             logger.error("Error deleting old photos from MongoDB: %s", error)
 
-    def detect_faces(self, image_data: bytes) -> bool:
-        """Detect faces in the given image data using either YOLO or OpenCV HaarCascade."""
+    def detect_faces(self, image_data: bytes):
+        """Detect faces and return a list of detections with bbox + confidence."""
         try:
             image_array = np.frombuffer(image_data, np.uint8)
             image = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
+            if image is None:
+                return []
 
-            if image is None or len(image.shape) != 3:
-                logger.error("Invalid image data provided for face detection.")
-                return False
+            detections = []
 
-            # YOLO detection
             if self.face_model:
                 results = self.face_model(image)
-                return any(len(r.boxes) > 0 for r in results)
+                for box in results[0].boxes:
+                    detections.append({
+                        "bbox": box.xyxy[0].tolist(),  # [x1,y1,x2,y2]
+                        "conf": float(box.conf[0]),
+                        "class": self.face_model.names[int(box.cls[0])]
+                    })
+            else:
+                gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+                face_cascade = cv2.CascadeClassifier(
+                    cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+                )
+                faces = face_cascade.detectMultiScale(gray, scaleFactor=1.05, minNeighbors=3)
+                for (x, y, w, h) in faces:
+                    detections.append({
+                        "bbox": [int(x), int(y), int(x+w), int(y+h)],
+                        "conf": None,
+                        "class": "face"
+                    })
 
-            # Fallback OpenCV HaarCascade
-            image = cv2.fastNlMeansDenoisingColored(image, None, 10, 10, 7, 21)
-            gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-            enhanced_image = clahe.apply(gray_image)
-
-            face_cascade = cv2.CascadeClassifier(
-                cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-            )
-            faces = face_cascade.detectMultiScale(
-                enhanced_image, scaleFactor=1.05, minNeighbors=3, minSize=(20, 20)
-            )
-            return len(faces) > 0
+            return detections
 
         except cv2.error as error:
-            logger.error("Error during face detection: %s", error)
-            return False
+            logger.error("OpenCV error during face detection: %s", error)
+            return []
         except Exception as error:
             logger.error("Unexpected error in face detection: %s", error)
-            return False
+            return []
 
     def process_photos(self) -> None:
-        """Process photos from MongoDB, check for faces, and copy photos with faces to a separate collection."""
+        """Process photos from MongoDB, store structured detections in FACE_COLLECTION."""
         if self.latest_processed_date is None:
             self.latest_processed_date = 0
 
@@ -155,48 +152,24 @@ class PhotoProcessor:
 
         for photo in photos:
             try:
-                logger.info(
-                    "Processing photo: %s with date %s",
-                    photo["filename"],
-                    photo["bsonTime"],
-                )
                 image_data = photo["data"]
+                detections = self.detect_faces(image_data)
+                if detections:
+                    face_collection.insert_one({
+                        "filename": photo["filename"],
+                        "date": photo["date"],
+                        "bsonTime": photo["bsonTime"],
+                        "num_faces": len(detections),
+                        "faces": detections,
+                        "s3_file_url": photo.get("s3_file_url", ""),
+                        "size": photo["size"]
+                    })
 
-                if self.detect_faces(image_data):
-                    face_collection.insert_one(
-                        {
-                            "filename": photo["filename"],
-                            "data": image_data,
-                            "s3_file_url": photo.get("s3_file_url", ""),
-                            "size": photo["size"],
-                            "date": photo["date"],
-                            "bsonTime": photo["bsonTime"],
-                        }
-                    )
-                    logger.info(
-                        "Face detected in %s. Photo copied to face collection.",
-                        photo["filename"],
-                    )
+                self.latest_processed_date = max(photo["date"], self.latest_processed_date)
 
-                self.latest_processed_date = max(
-                    photo["date"], self.latest_processed_date
-                )
-
-            except cv2.error as error:
-                logger.error(
-                    "Error with OpenCV while processing photo %s: %s",
-                    photo["filename"],
-                    error,
-                )
-            except PyMongoError as error:
-                logger.error(
-                    "MongoDB error while processing photo %s: %s",
-                    photo["filename"],
-                    error,
-                )
             except Exception as error:
                 logger.error(
-                    "Unexpected error processing photo %s: %s", photo["filename"], error
+                    "Error processing photo %s: %s", photo["filename"], error
                 )
 
         self.delete_old_faces(face_collection)
