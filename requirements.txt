@@ -7,3 +7,4 @@ types-requests
 pylint
 astroid
 wrapt
+sentence-transformers
