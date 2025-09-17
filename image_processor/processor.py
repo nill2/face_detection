@@ -1,17 +1,19 @@
-"""Module for processing photos, detecting faces, and storing the results in MongoDB."""
+"""Module for processing photos, detecting faces, storing results in MongoDB, and saving embeddings for RAG queries."""
 
 import logging
 import time
 from pathlib import Path
 import requests
 from ultralytics import YOLO
-from pymongo import MongoClient, DESCENDING  # pylint: disable=E0401
-from pymongo.errors import ConnectionFailure, PyMongoError  # pylint: disable=E0401
+from pymongo import MongoClient, DESCENDING
+from pymongo.errors import ConnectionFailure, PyMongoError
 from pymongo.collection import Collection
-import numpy as np  # pylint: disable=E0401
-import cv2  # pylint: disable=E0401
+import numpy as np
+import cv2
 
-from .config import (  # pylint: disable=E0402
+# from .embeddings import EmbeddingEngine
+
+from .config import (
     MONGO_HOST,
     MONGO_PORT,
     MONGO_DB,
@@ -21,6 +23,7 @@ from .config import (  # pylint: disable=E0402
     FACES_HISTORY_DAYS,
     FACE_DETECTION_MODEL,
 )
+from .embeddings import EmbeddingEngine  # Your embedding wrapper
 
 # Logger configuration
 logging.basicConfig(
@@ -30,20 +33,18 @@ logger = logging.getLogger(__name__)
 
 
 class PhotoProcessor:
-    """Process photos, detect faces using OpenCV or YOLO, and store results in MongoDB."""
+    """Process photos, detect faces, store results in MongoDB, and save embeddings for RAG."""
 
     def __init__(self) -> None:
-        """Initialize the photo processor."""
+        """Initialize the photo processor and embedding engine."""
         self.latest_processed_date: int = 0
         self.face_model = None
+        self.embedding_engine = EmbeddingEngine()
 
         if FACE_DETECTION_MODEL:
             try:
-                # Ensure models/ folder exists
                 models_dir = Path(__file__).resolve().parent / "models"
                 models_dir.mkdir(parents=True, exist_ok=True)
-
-                # Always use local path inside models/
                 model_path = models_dir / Path(FACE_DETECTION_MODEL).name
 
                 if not model_path.exists():
@@ -51,17 +52,14 @@ class PhotoProcessor:
                         "YOLO model '%s' not found locally. Downloading...",
                         FACE_DETECTION_MODEL,
                     )
-
-                    # Correct URL for yolov8n-face.pt model
                     url = "https://github.com/akanametov/yolov8-face/releases/download/v0.0.0/yolov8n-face.pt"
                     response = requests.get(url, stream=True, timeout=60)
                     response.raise_for_status()
-                    with open(model_path, "wb") as f:
+                    with open(model_path, "wb") as file:
                         for chunk in response.iter_content(chunk_size=8192):
-                            f.write(chunk)
+                            file.write(chunk)
                     logger.info("YOLO model downloaded to %s", model_path)
 
-                # Load model from local path
                 self.face_model = YOLO(str(model_path))
                 logger.info("YOLO model loaded successfully from %s", model_path)
 
@@ -112,12 +110,10 @@ class PhotoProcessor:
                 logger.error("Invalid image data provided for face detection.")
                 return False
 
-            # YOLO detection
             if self.face_model:
                 results = self.face_model(image)
                 return any(len(r.boxes) > 0 for r in results)
 
-            # Fallback OpenCV HaarCascade
             image = cv2.fastNlMeansDenoisingColored(image, None, 10, 10, 7, 21)
             gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
             clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
@@ -139,7 +135,10 @@ class PhotoProcessor:
             return False
 
     def process_photos(self) -> None:
-        """Process photos from MongoDB, check for faces, and copy photos with faces to a separate collection."""
+        """
+        Process photos from MongoDB, check for faces, compute embeddings,
+        and copy photos with faces to a separate collection.
+        """
         if self.latest_processed_date is None:
             self.latest_processed_date = 0
 
@@ -163,10 +162,14 @@ class PhotoProcessor:
                 image_data = photo["data"]
 
                 if self.detect_faces(image_data):
+                    # Compute embedding for RAG
+                    embedding = self.embedding_engine.encode(photo["filename"])
+
                     face_collection.insert_one(
                         {
                             "filename": photo["filename"],
                             "data": image_data,
+                            "embedding": embedding,
                             "s3_file_url": photo.get("s3_file_url", ""),
                             "size": photo["size"],
                             "date": photo["date"],
@@ -174,7 +177,7 @@ class PhotoProcessor:
                         }
                     )
                     logger.info(
-                        "Face detected in %s. Photo copied to face collection.",
+                        "Face detected in %s. Photo copied to face collection with embedding.",
                         photo["filename"],
                     )
 
