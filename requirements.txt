@@ -4,6 +4,6 @@ numpy>=1.21.0
 python-dotenv>=1.0.0
 ultralytics
 types-requests
-pylint==2.22.2
+pylint
 astroid==2.17.8
 wrapt==1.15.0
