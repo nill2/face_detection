@@ -112,8 +112,11 @@ class PhotoProcessor:
 
             if self.face_model:
                 results = self.face_model(image)
-                return any(len(r.boxes) > 0 for r in results)
+                detected = any(len(r.boxes) > 0 for r in results)
+                logger.info("Face detection method: YOLO, detected=%s", detected)
+                return detected
 
+            # OpenCV path
             image = cv2.fastNlMeansDenoisingColored(image, None, 10, 10, 7, 21)
             gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
             clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
@@ -125,7 +128,9 @@ class PhotoProcessor:
             faces = face_cascade.detectMultiScale(
                 enhanced_image, scaleFactor=1.05, minNeighbors=3, minSize=(20, 20)
             )
-            return len(faces) > 0
+            detected = len(faces) > 0
+            logger.info("Face detection method: OpenCV, detected=%s", detected)
+            return detected
 
         except cv2.error as error:
             logger.error("Error during face detection: %s", error)
@@ -133,6 +138,7 @@ class PhotoProcessor:
         except Exception as error:
             logger.error("Unexpected error in face detection: %s", error)
             return False
+
 
     def process_photos(self) -> None:
         """
