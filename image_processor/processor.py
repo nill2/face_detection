@@ -170,6 +170,7 @@ class PhotoProcessor:
                 if self.detect_faces(image_data):
                     # Compute embedding for RAG
                     embedding = self.embedding_engine.encode(photo["filename"])
+                    logger.info("Generated embedding of length %d for %s", len(embedding), photo["filename"])
 
                     face_collection.insert_one(
                         {
