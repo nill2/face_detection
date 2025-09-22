@@ -110,12 +110,6 @@ class PhotoProcessor:
                 logger.error("Invalid image data provided for face detection.")
                 return False
 
-            if self.face_model:
-                results = self.face_model(image)
-                detected = any(len(r.boxes) > 0 for r in results)
-                logger.info("Face detection method: YOLO, detected=%s", detected)
-                return detected
-
             # OpenCV path
             image = cv2.fastNlMeansDenoisingColored(image, None, 10, 10, 7, 21)
             gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
@@ -130,7 +124,13 @@ class PhotoProcessor:
             )
             detected = len(faces) > 0
             logger.info("Face detection method: OpenCV, detected=%s", detected)
-            return detected
+            if detected:
+                if self.face_model:
+                    results = self.face_model(image)
+                    detected = any(len(r.boxes) > 0 for r in results)
+                    logger.info("Face detection method: YOLO, detected=%s", detected)
+                    return detected
+            return False
 
         except cv2.error as error:
             logger.error("Error during face detection: %s", error)
