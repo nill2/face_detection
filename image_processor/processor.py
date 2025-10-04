@@ -23,7 +23,7 @@ from .config import (
     FACES_HISTORY_DAYS,
     FACE_DETECTION_MODEL,
 )
-from .embeddings import EmbeddingEngine  # Your embedding wrapper
+from .embeddings import EmbeddingEngine, EfficientEmbeddingEngine  # Enhanced embedding engines
 
 # Logger configuration
 logging.basicConfig(
@@ -36,10 +36,11 @@ class PhotoProcessor:
     """Process photos, detect faces, store results in MongoDB, and save embeddings for RAG."""
 
     def __init__(self) -> None:
-        """Initialize the photo processor and embedding engine."""
+        """Initialize the photo processor and embedding engines."""
         self.latest_processed_date: int = 0
         self.face_model = None
-        self.embedding_engine = EmbeddingEngine()
+        self.embedding_engine = EmbeddingEngine()  # Legacy text embeddings
+        self.efficient_engine = EfficientEmbeddingEngine()  # Enhanced search embeddings
 
         if FACE_DETECTION_MODEL:
             try:
@@ -168,21 +169,37 @@ class PhotoProcessor:
                 image_data = photo["data"]
 
                 if self.detect_faces(image_data):
-                    # Compute embedding for RAG
-                    embedding = self.embedding_engine.encode(photo["filename"])
-                    logger.info("Generated embedding of length %d for %s", len(embedding), photo["filename"])
-
-                    face_collection.insert_one(
-                        {
-                            "filename": photo["filename"],
-                            "data": image_data,
-                            "embedding": embedding,
-                            "s3_file_url": photo.get("s3_file_url", ""),
-                            "size": photo["size"],
-                            "date": photo["date"],
-                            "bsonTime": photo["bsonTime"],
-                        }
+                    # Generate efficient search embeddings
+                    search_embeddings = self.efficient_engine.generate_search_embeddings(
+                        image_data=image_data,
+                        timestamp=photo["date"],
+                        filename=photo["filename"],
+                        camera_location=photo.get("camera_location", "")
                     )
+                    
+                    # Also generate legacy text embedding for compatibility
+                    text_embedding = self.embedding_engine.encode(photo["filename"])
+                    
+                    logger.info("Generated %d embedding types for %s", len(search_embeddings), photo["filename"])
+
+                    # Store comprehensive document with all embeddings
+                    document = {
+                        "filename": photo["filename"],
+                        "data": image_data,
+                        "embedding": text_embedding,  # Legacy field
+                        "search_embeddings": search_embeddings,  # New efficient embeddings
+                        "s3_file_url": photo.get("s3_file_url", ""),
+                        "size": photo["size"],
+                        "date": photo["date"],
+                        "bsonTime": photo["bsonTime"],
+                        "camera_location": photo.get("camera_location", ""),
+                        "has_faces": True,
+                        "face_count": self._extract_face_count(search_embeddings),
+                        "vehicle_detected": self._extract_vehicle_score(search_embeddings),
+                        "processing_timestamp": time.time()
+                    }
+                    
+                    face_collection.insert_one(document)
                     logger.info(
                         "Face detected in %s. Photo copied to face collection with embedding.",
                         photo["filename"],
@@ -210,3 +227,25 @@ class PhotoProcessor:
                 )
 
         self.delete_old_faces(face_collection)
+
+    def _extract_face_count(self, search_embeddings: Dict[str, bytes]) -> int:
+        """Extract face count from search embeddings."""
+        try:
+            if 'face_count' in search_embeddings:
+                face_count_bytes = search_embeddings['face_count']
+                face_count = np.frombuffer(face_count_bytes, dtype=np.float32)[0]
+                return int(face_count)
+            return 0
+        except Exception:
+            return 0
+
+    def _extract_vehicle_score(self, search_embeddings: Dict[str, bytes]) -> float:
+        """Extract vehicle detection score from search embeddings."""
+        try:
+            if 'vehicle_score' in search_embeddings:
+                vehicle_bytes = search_embeddings['vehicle_score']
+                vehicle_score = np.frombuffer(vehicle_bytes, dtype=np.float32)[0]
+                return float(vehicle_score)
+            return 0.0
+        except Exception:
+            return 0.0

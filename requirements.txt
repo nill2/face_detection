@@ -8,3 +8,6 @@ pylint
 astroid
 wrapt
 sentence-transformers
+transformers>=4.20.0
+torch>=1.12.0
+Pillow>=9.0.0

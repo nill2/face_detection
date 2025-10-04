@@ -7,7 +7,7 @@ MONGO_HOST = os.getenv("MONGO_HOST", "localhost")
 MONGO_PORT = int(os.getenv("MONGO_PORT", "27017"))
 MONGO_DB = os.getenv("MONGO_DB", "photos")
 MONGO_COLLECTION = os.getenv("MONGO_COLLECTION", "images")
-FACE_COLLECTION = os.getenv("FACE_COLLECTION", "faces")
+FACE_COLLECTION = os.getenv("FACE_COLLECTION", "nill-home-faces")
 
 # Logging / error level
 ERROR_LVL = os.getenv("ERROR_LVL", "info")
