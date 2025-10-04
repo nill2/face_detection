@@ -24,6 +24,14 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v3
 
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf "/usr/local/share/boost"
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+          df -h
+
       - name: Set up Python 3.10
         uses: actions/setup-python@v3
         with:
@@ -32,10 +40,11 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install opencv-python-headless
+          pip install --no-cache-dir -r requirements.txt
+          pip install --no-cache-dir opencv-python-headless
 
-      - name: Set up packages
+      # Keep this if you need system packages (apt, ffmpeg, libgl1, etc.)
+      - name: Set up system packages
         uses: nill2/gha/install-packages@main
 
       - name: Lint with flake8 and pylint
@@ -61,6 +70,7 @@ jobs:
           python ./tests/setuptstmongo.py
           python -m unittest discover -s tests
 
+      # Uncomment if you want E2E tests
       #- name: Test e2e tests with pytest
       #  env:
       #    IS_TEST: "GHA"
