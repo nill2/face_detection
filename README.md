@@ -12,16 +12,19 @@ This application analyzes photos from your CCTV camera, detects faces, and gener
 ## 🚀 Features
 
 ### Face Detection
+
 - **YOLOv8n-face**: Primary face detection model
 - **OpenCV HaarCascade**: Fallback detection method
 - **High Accuracy**: Optimized for CCTV camera conditions
 
 ### Vehicle Detection
+
 - **Car Detection**: Color-based detection (white, black, gray, blue, red)
 - **Motorcycle Detection**: Shape and color analysis
 - **Vehicle Score**: Confidence score for vehicle presence
 
 ### Efficient Embeddings
+
 - **Visual Content**: CLIP-based image understanding (512D)
 - **Temporal Context**: Time-based features (9D)
 - **Scene Analysis**: Lighting, indoor/outdoor, quality (7D)
@@ -40,6 +43,7 @@ Raw Photos → Face Detection → Efficient Embeddings → MongoDB Storage
 ## 📊 Database Schema
 
 ### Input: `images` collection
+
 ```json
 {
   "filename": "cctv_camera_1_1234567890.jpg",
@@ -50,6 +54,7 @@ Raw Photos → Face Detection → Efficient Embeddings → MongoDB Storage
 ```
 
 ### Output: `faces` collection
+
 ```json
 {
   "filename": "cctv_camera_1_1234567890.jpg",
@@ -77,6 +82,7 @@ Raw Photos → Face Detection → Efficient Embeddings → MongoDB Storage
 ## 🚀 Usage
 
 ### Run Face Processing
+
 ```bash
 # Process photos once
 python main.py
@@ -93,6 +99,7 @@ while True:
 ```
 
 ### Configuration
+
 ```bash
 # Environment variables
 export MONGO_HOST=localhost
@@ -111,6 +118,7 @@ pip install -r requirements.txt
 ```
 
 Key packages:
+
 - `opencv-python` - Face detection and image processing
 - `ultralytics` - YOLO models
 - `transformers` - CLIP embeddings
@@ -121,16 +129,19 @@ Key packages:
 ## 📈 Performance
 
 ### Processing Speed
+
 - **Face Detection**: ~50-100ms per image
 - **Embedding Generation**: ~200-500ms per image
 - **Total Processing**: ~250-600ms per image
 
 ### Memory Usage
+
 - **CLIP Model**: ~1.5GB
 - **Text Model**: ~200MB
 - **Total Memory**: ~2GB
 
 ### Storage Efficiency
+
 - **Visual Embedding**: 2KB (512D float32)
 - **Temporal Embedding**: 36 bytes (9D float32)
 - **Scene Embedding**: 28 bytes (7D float32)
@@ -142,56 +153,66 @@ Key packages:
 The generated embeddings enable efficient search for:
 
 ### Face-based Search
+
 - **"photos with faces"** - Find all photos with detected faces
 - **"photos with 2 faces"** - Find photos with specific face count
 - **"photos with me"** - Face recognition (requires external service)
 
 ### Vehicle Search
+
 - **"photos with cars"** - Find photos with vehicle detection
 - **"photos with motorcycles"** - Find motorcycle detections
 - **"high vehicle activity"** - Find photos with high vehicle scores
 
 ### Time-based Search
+
 - **"morning photos"** - Find photos from morning hours
 - **"night time"** - Find photos from night hours
 - **"weekend activity"** - Find photos from weekends
 - **"photos from last week"** - Time range queries
 
 ### Scene-based Search
+
 - **"outdoor photos"** - Find outdoor scenes
 - **"indoor photos"** - Find indoor scenes
 - **"bright photos"** - Find well-lit photos
 - **"dark photos"** - Find low-light photos
 
 ### Location Search
+
 - **"front door camera"** - Find photos from specific camera
 - **"backyard photos"** - Location-based filtering
 
 ## 🎯 Embedding Types Explained
 
 ### 1. Visual Content (CLIP)
+
 - **Purpose**: Understand what's in the image
 - **Size**: 512 dimensions
 - **Use**: "photos with people", "outdoor scenes", "vehicles"
 
 ### 2. Temporal Context
+
 - **Purpose**: Time-based search
 - **Size**: 9 dimensions
 - **Features**: Hour, day, month, time periods, weekday/weekend
 - **Use**: "morning photos", "night time", "weekend activity"
 
 ### 3. Scene Analysis
+
 - **Purpose**: Environment and quality
 - **Size**: 7 dimensions
 - **Features**: Brightness, contrast, color, quality, indoor/outdoor
 - **Use**: "bright photos", "outdoor scenes", "high quality"
 
 ### 4. Object Detection
+
 - **Purpose**: Count and locate objects
 - **Features**: Face count, face regions, vehicle score
 - **Use**: "photos with faces", "photos with cars", "multiple people"
 
 ### 5. Search Text
+
 - **Purpose**: Semantic search
 - **Size**: 384 dimensions
 - **Content**: "morning bright camera front_door weekday"
