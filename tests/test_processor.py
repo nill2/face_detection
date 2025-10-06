@@ -85,9 +85,12 @@ class TestPhotoProcessor(unittest.TestCase):
         result = self.processor.connect_to_mongodb(db_name, collection_name)
 
         # Assertions
-        mock_mongo_client.assert_called_with(
-            MONGO_HOST, MONGO_PORT
-        )  # Verify MongoClient called with default host and port
+        if MONGO_HOST.startswith("mongodb+srv://"):
+            mock_mongo_client.assert_called_with(MONGO_HOST)
+        else:
+            mock_mongo_client.assert_called_with(
+                MONGO_HOST, MONGO_PORT
+            )  # Verify MongoClient called with default host and port
         mock_client.__getitem__.assert_called_with(db_name)  # Verify database access
         mock_db.__getitem__.assert_called_with(
             collection_name
