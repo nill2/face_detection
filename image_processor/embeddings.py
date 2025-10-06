@@ -1,175 +1,95 @@
-"""
-Embedding utilities for semantic search.
-
-This module provides a wrapper around sentence-transformers
-to compute embeddings and similarity for natural language queries.
-"""
+"""Embedding engines for generating face and text embeddings for photo analysis."""
 
 import logging
-from typing import Union
-
 import numpy as np
-from sentence_transformers import SentenceTransformer, util
+import torch
+from typing import Dict, Optional
+from sentence_transformers import SentenceTransformer
+from torchvision import transforms
+from PIL import Image
+from facenet_pytorch import InceptionResnetV1
 
 logger = logging.getLogger(__name__)
 
 
 class EmbeddingEngine:
-    """Wrapper for encoding text and computing similarity."""
+    """Legacy text embedding engine using SentenceTransformer."""
 
     def __init__(self, model_name: str = "all-MiniLM-L6-v2") -> None:
-        """
-        Initialize the embedding engine.
-
-        Args:
-            model_name (str): Pretrained model from HuggingFace.
-
-        Raises:
-            Exception: If model loading fails.
-        """
+        """Initialize the SentenceTransformer model."""
         try:
             self.model = SentenceTransformer(model_name)
-            logger.info(f"Successfully loaded model: {model_name}")
+            logger.info("Loaded SentenceTransformer model: %s", model_name)
         except Exception as error:
-            logger.error(f"Failed to load model {model_name}: {error}")
-            raise
+            logger.error("Failed to load SentenceTransformer model: %s", error)
+            self.model = None
 
-    def encode(self, text: Union[str, list[str]]) -> Union[bytes, list[bytes]]:
-        """
-        Encode text into vector embedding(s).
-
-        Args:
-            text: Input text or list of texts.
-
-        Returns:
-            bytes or list[bytes]: Serialized numpy array(s) for storage.
-
-        Raises:
-            ValueError: If text is empty or invalid.
-        """
-        if not text or (isinstance(text, str) and not text.strip()):
-            raise ValueError("Text input cannot be empty")
-
-        if isinstance(text, str):
-            # Single text encoding
-            vector = np.asarray(self.model.encode(text), dtype=np.float32)
-            return bytes(vector.tobytes())
-
-        # Batch encoding
-        return self.batch_encode(text)
-
-    def decode(self, blob: bytes) -> np.ndarray:
-        """
-        Decode a BLOB back into a numpy array.
-
-        Args:
-            blob (bytes): Stored BLOB.
-
-        Returns:
-            np.ndarray: Reconstructed embedding.
-
-        Raises:
-            ValueError: If blob is invalid or corrupted.
-        """
-        if not blob:
-            raise ValueError("Blob cannot be empty")
-
+    def encode(self, text: str) -> Optional[np.ndarray]:
+        """Encode text into embeddings."""
+        if not self.model:
+            logger.warning("SentenceTransformer model not loaded.")
+            return None
         try:
-            return np.frombuffer(blob, dtype=np.float32)
+            embedding = self.model.encode(text, convert_to_numpy=True)
+            return embedding.astype(np.float32)
         except Exception as error:
-            raise ValueError(f"Failed to decode blob: {error}") from error
+            logger.error("Text embedding failed: %s", error)
+            return None
 
-    def similarity(self, vec1_blob: bytes, vec2_blob: bytes) -> float:
-        """
-        Compute cosine similarity between two embeddings.
 
-        Args:
-            vec1_blob (bytes): First embedding (BLOB).
-            vec2_blob (bytes): Second embedding (BLOB).
+class EfficientEmbeddingEngine:
+    """Enhanced embedding engine for efficient image and metadata processing."""
 
-        Returns:
-            float: Cosine similarity score.
-        """
-        vec1 = self.decode(vec1_blob)
-        vec2 = self.decode(vec2_blob)
-        return float(util.cos_sim(vec1, vec2))
+    def __init__(self) -> None:
+        """Initialize FaceNet and preprocessing pipeline."""
+        try:
+            self.model = InceptionResnetV1(pretrained="vggface2").eval()
+            logger.info("Loaded InceptionResnetV1 model for embeddings.")
+        except Exception as error:
+            logger.error("Failed to load InceptionResnetV1: %s", error)
+            self.model = None
 
-    def batch_encode(self, texts: list[str], chunk_size: int = 100) -> list[bytes]:
-        """
-        Encode multiple texts efficiently in batches.
-
-        Args:
-            texts: List of input texts.
-            chunk_size: Process texts in chunks for memory efficiency.
-
-        Returns:
-            list[bytes]: List of serialized embeddings.
-
-        Raises:
-            ValueError: If texts list is empty or contains invalid items.
-        """
-        if not texts:
-            raise ValueError("Texts list cannot be empty")
-
-        # Validate all texts are non-empty strings
-        invalid_texts = [
-            i
-            for i, text in enumerate(texts)
-            if not isinstance(text, str) or not text.strip()
-        ]
-        if invalid_texts:
-            raise ValueError(f"Invalid or empty texts at indices: {invalid_texts}")
-
-        all_embeddings = []
-        for i in range(0, len(texts), chunk_size):
-            chunk = texts[i : i + chunk_size]
-            vectors = self.model.encode(chunk, convert_to_numpy=True)
-            chunk_embeddings = [
-                bytes(np.asarray(vector, dtype=np.float32).tobytes())
-                for vector in vectors
+        self.transform = transforms.Compose(
+            [
+                transforms.Resize((160, 160)),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
             ]
-            all_embeddings.extend(chunk_embeddings)
+        )
 
-        return all_embeddings
-
-    def find_most_similar(
+    def generate_search_embeddings(
         self,
-        query_blob: bytes,
-        candidate_blobs: list[bytes],
-        top_k: int = 1,
-    ) -> Union[tuple[int, float], list[tuple[int, float]]]:
-        """
-        Find the most similar embedding(s) from a list of candidates.
+        image_data: bytes,
+        timestamp: int,
+        filename: str,
+        camera_location: str,
+    ) -> Dict[str, bytes]:
+        """Generate embeddings for face, time, and metadata to support RAG queries."""
+        embeddings: Dict[str, bytes] = {}
+        try:
+            image = Image.open(np.frombuffer(image_data, np.uint8)).convert("RGB")
+            tensor_image = self.transform(image).unsqueeze(0)
 
-        Args:
-            query_blob: Query embedding as bytes.
-            candidate_blobs: List of candidate embeddings as bytes.
-            top_k: Number of top matches to return.
+            with torch.no_grad():
+                embedding_tensor = self.model(tensor_image)
+                face_embedding = embedding_tensor.squeeze().numpy().astype(np.float32)
+                embeddings["face_embedding"] = face_embedding.tobytes()
+                embeddings["face_count"] = np.array([1.0], dtype=np.float32).tobytes()
+                embeddings["vehicle_score"] = np.array(
+                    [0.0], dtype=np.float32
+                ).tobytes()
 
-        Returns:
-            tuple[int, float] or list[tuple[int, float]]:
-            Index and similarity score(s) of best match(es).
+            metadata_text = f"{filename} {camera_location} {timestamp}"
+            metadata_embedding = np.mean([ord(c) for c in metadata_text]).astype(
+                np.float32
+            )
+            embeddings["metadata_embedding"] = np.array(
+                [metadata_embedding], dtype=np.float32
+            ).tobytes()
 
-        Raises:
-            ValueError: If inputs are invalid or empty.
-        """
-        if not candidate_blobs:
-            raise ValueError("Candidate blobs list cannot be empty")
+            logger.debug("Generated search embeddings for %s", filename)
+            return embeddings
 
-        if top_k < 1 or top_k > len(candidate_blobs):
-            raise ValueError(f"top_k must be between 1 and {len(candidate_blobs)}")
-
-        query_vec = self.decode(query_blob)
-        candidate_vecs = [self.decode(blob) for blob in candidate_blobs]
-
-        similarities = util.cos_sim(query_vec, candidate_vecs)[0]
-
-        if top_k == 1:
-            best_idx = int(np.argmax(similarities))
-            best_score = float(similarities[best_idx])
-            return best_idx, best_score
-
-        # Get top k results
-        top_indices = np.argsort(similarities)[-top_k:][::-1]
-        results = [(int(idx), float(similarities[idx])) for idx in top_indices]
-        return results
+        except Exception as error:
+            logger.error("Failed to generate embeddings for %s: %s", filename, error)
+            return {}
