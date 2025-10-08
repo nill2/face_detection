@@ -57,7 +57,7 @@ def main_loop(interval=30):
             # Update health check file every HEALTH_INTERVAL
             now = time.time()
             if now - last_health_update > HEALTH_INTERVAL:
-                HEALTH_FILE.write_text(str(now))
+                HEALTH_FILE.write_text(str(now), encoding="utf-8")
                 last_health_update = now
 
             # Log CPU/memory usage
@@ -81,6 +81,6 @@ if __name__ == "__main__":
     signal.signal(signal.SIGTERM, lambda s, f: signal_handler(s, f, should_run))
 
     logger.info("Starting the image processing service...")
-    HEALTH_FILE.write_text(str(time.time()))
+    HEALTH_FILE.write_text(str(time.time()), encoding="utf-8")
     main_loop()
     logger.info("Image processing service stopped.")
