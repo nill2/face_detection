@@ -1,11 +1,7 @@
 """
 Main entry point for the image processing service.
 
-This script sets up logging, signal handling, a lightweight health-check server,
-and runs the image processing loop until a termination signal is received.
-
-Health endpoint:
-    GET /health  → returns 200 OK if the process is alive
+Adds health monitoring and resource logging.
 """
 
 import sys
@@ -13,27 +9,24 @@ import os
 import time
 import logging
 import signal
-import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
+import psutil
+from pathlib import Path
 
-# Add the project root to PYTHONPATH
+# Add project root
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))  # pylint: disable=C0413
+from image_processor.processor import PhotoProcessor  # noqa
 
-from image_processor.processor import PhotoProcessor  # noqa: E402
-
-# ----------------------------------------------------------------------
-# Logging configuration
-# ----------------------------------------------------------------------
+# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
 
-# ----------------------------------------------------------------------
 # Global control flag
-# ----------------------------------------------------------------------
 should_run = [True]
+HEALTH_FILE = Path("/tmp/healthcheck.txt")
+HEALTH_INTERVAL = 30  # seconds
 
 
 def signal_handler(_, __, should_run_flag):
@@ -42,74 +35,52 @@ def signal_handler(_, __, should_run_flag):
     should_run_flag[0] = False
 
 
-# ----------------------------------------------------------------------
-# Health check HTTP server
-# ----------------------------------------------------------------------
-def start_health_server(port=5000):
-    """Start a tiny HTTP server providing a /health endpoint."""
-
-    class HealthHandler(BaseHTTPRequestHandler):
-        """Simple HTTP handler for /health endpoint."""
-
-        def do_GET(self):
-            """Return OK for /health requests."""
-            if self.path == "/health":
-                self.send_response(200)
-                self.end_headers()
-                self.wfile.write(b"OK")
-            else:
-                self.send_response(404)
-                self.end_headers()
-
-        def log_message(self, *args):
-            """Suppress default HTTP access logs."""
-            return
-
-    def run_server():
-        """Run the health check server in a separate thread."""
-        try:
-            server = HTTPServer(("0.0.0.0", port), HealthHandler)
-            logger.info("Health check server running on port %d", port)
-            server.serve_forever()
-        except Exception as e:
-            logger.error("Health server failed: %s", e)
-
-    thread = threading.Thread(target=run_server, daemon=True)
-    thread.start()
+def log_resource_usage():
+    """Log container resource usage (memory, CPU) every interval."""
+    process = psutil.Process(os.getpid())
+    with process.oneshot():
+        cpu = process.cpu_percent(interval=None)
+        mem = process.memory_info().rss / (1024 * 1024)
+        logger.info("Resource usage — CPU: %.1f%%, Memory: %.1f MB", cpu, mem)
 
 
-# ----------------------------------------------------------------------
-# Main loop
-# ----------------------------------------------------------------------
 def main_loop(interval=30):
-    """
-    Run the process_photos function periodically.
-
-    Args:
-        interval (int): Interval in seconds between processing runs.
-    """
+    """Run the process_photos function periodically with health check and resource logging."""
     processor = PhotoProcessor()
+    last_health_update = 0
 
     while should_run[0]:
-        logger.info("Running photo processing...")
         try:
+            logger.info("Running photo processing...")
             processor.process_photos()
-        except Exception as e:  # noqa: BLE001
+
+            # Update health check file every HEALTH_INTERVAL
+            now = time.time()
+            if now - last_health_update > HEALTH_INTERVAL:
+                HEALTH_FILE.write_text(str(now))
+                last_health_update = now
+
+            # Log CPU/memory usage
+            log_resource_usage()
+
+        except (ValueError, TypeError, IOError) as e:
             logger.error("An error occurred during photo processing: %s", e)
+        except Exception as e:
+            logger.exception("Unexpected error in main loop: %s", e)
+
         if should_run[0]:
             logger.info("Waiting for %d seconds before the next run...", interval)
             time.sleep(interval)
 
+    logger.info("Exiting main loop.")
 
-# ----------------------------------------------------------------------
-# Entry point
-# ----------------------------------------------------------------------
+
 if __name__ == "__main__":
-    # Register signal handlers for graceful shutdown
+    # Register signal handlers
     signal.signal(signal.SIGINT, lambda s, f: signal_handler(s, f, should_run))
     signal.signal(signal.SIGTERM, lambda s, f: signal_handler(s, f, should_run))
 
     logger.info("Starting the image processing service...")
-    start_health_server(port=5000)  # lightweight /health endpoint
+    HEALTH_FILE.write_text(str(time.time()))
     main_loop()
     logger.info("Image processing service stopped.")
