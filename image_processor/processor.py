@@ -20,7 +20,8 @@ from .config import (
 from .embeddings import EmbeddingEngine
 
 logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
 
@@ -48,7 +49,7 @@ class PhotoProcessor:
                 client = MongoClient(MONGO_HOST, MONGO_PORT)
             return client[db_name][collection_name]
         except ConnectionFailure as e:
-            logger.error("Failed to connect to MongoDB: %s", e)
+            logger.error("Failed to connect to MongoDB: %s", str(e))
             return None
 
     def process_photos(self) -> None:
@@ -64,9 +65,11 @@ class PhotoProcessor:
         logger.info("Found %d new photos to process.", len(photos))
 
         for photo in photos:
+            filename = photo.get("filename", "<unknown>")
             try:
                 image_data = photo.get("data")
                 if not image_data:
+                    logger.warning("Photo %s has no data, skipping.", filename)
                     continue
 
                 embeddings = self.embedding_engine.generate_face_embeddings(image_data)
@@ -76,10 +79,11 @@ class PhotoProcessor:
                     )[0]
                 )
                 if face_count == 0:
+                    logger.info("No faces detected in %s, skipping.", filename)
                     continue
 
                 document = {
-                    "filename": photo.get("filename", ""),
+                    "filename": filename,
                     "data": image_data,
                     "search_embeddings": embeddings,
                     "s3_file_url": photo.get("s3_file_url", ""),
@@ -94,7 +98,7 @@ class PhotoProcessor:
                 face_collection.insert_one(document)
                 logger.info(
                     "Processed and stored photo %s with %d faces.",
-                    photo.get("filename"),
+                    filename,
                     face_count,
                 )
                 self.latest_processed_date = max(
@@ -102,11 +106,21 @@ class PhotoProcessor:
                 )
 
             except PyMongoError as e:
-                logger.error("MongoDB error: %s", e)
+                logger.error("MongoDB error while processing %s: %s", filename, str(e))
             except Exception as e:
-                logger.error("Error processing photo %s: %s", photo.get("filename"), e)
+                # Avoid dumping binary blobs into logs
+                error_type = type(e).__name__
+                error_msg = str(e)
+                if len(error_msg) > 300:
+                    error_msg = error_msg[:300] + "... [truncated]"
+                logger.error(
+                    "Unexpected error processing photo %s: %s - %s",
+                    filename,
+                    error_type,
+                    error_msg,
+                )
 
-        # cleanup
+        # Cleanup step
         self.delete_old_faces(face_collection)
 
     def delete_old_faces(self, face_collection: Collection) -> None:
@@ -116,7 +130,7 @@ class PhotoProcessor:
             result = face_collection.delete_many({"date": {"$lt": threshold}})
             logger.info("Deleted %d old records.", result.deleted_count)
         except PyMongoError as e:
-            logger.error("Error deleting old records: %s", e)
+            logger.error("Error deleting old records: %s", str(e))
 
 
 @app.route("/health", methods=["GET"])  # type: ignore[misc]
