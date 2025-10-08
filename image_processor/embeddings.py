@@ -1,53 +1,36 @@
-"""Embedding engines for generating face and text embeddings for photo analysis."""
+"""Unified embedding engine for detecting faces and generating embeddings efficiently."""
 
 import logging
+from typing import List, Dict, Any, Optional
 import numpy as np
 import torch
-from typing import Dict, Optional
-from sentence_transformers import SentenceTransformer
+from ultralytics import YOLO
 from torchvision import transforms
-from PIL import Image
 from facenet_pytorch import InceptionResnetV1
+import cv2
+from PIL import Image
 
 logger = logging.getLogger(__name__)
 
 
-class EmbeddingEngine:
-    """Legacy text embedding engine using SentenceTransformer."""
+class FaceEmbeddingEngine:
+    """Unified engine combining YOLO face detection and FaceNet embeddings."""
 
-    def __init__(self, model_name: str = "all-MiniLM-L6-v2") -> None:
-        """Initialize the SentenceTransformer model."""
+    def __init__(self, model_path: str = "yolov8n-face.pt") -> None:
+        """Initialize YOLO and FaceNet models."""
         try:
-            self.model = SentenceTransformer(model_name)
-            logger.info("Loaded SentenceTransformer model: %s", model_name)
+            self.face_detector = YOLO(model_path)
+            logger.info("Loaded YOLO face detector: %s", model_path)
         except Exception as error:
-            logger.error("Failed to load SentenceTransformer model: %s", error)
-            self.model = None
+            logger.error("Failed to load YOLO model: %s", error)
+            self.face_detector = None
 
-    def encode(self, text: str) -> Optional[np.ndarray]:
-        """Encode text into embeddings."""
-        if not self.model:
-            logger.warning("SentenceTransformer model not loaded.")
-            return None
         try:
-            embedding = self.model.encode(text, convert_to_numpy=True)
-            return embedding.astype(np.float32)
+            self.embedding_model = InceptionResnetV1(pretrained="vggface2").eval()
+            logger.info("Loaded FaceNet embedding model.")
         except Exception as error:
-            logger.error("Text embedding failed: %s", error)
-            return None
-
-
-class EfficientEmbeddingEngine:
-    """Enhanced embedding engine for efficient image and metadata processing."""
-
-    def __init__(self) -> None:
-        """Initialize FaceNet and preprocessing pipeline."""
-        try:
-            self.model = InceptionResnetV1(pretrained="vggface2").eval()
-            logger.info("Loaded InceptionResnetV1 model for embeddings.")
-        except Exception as error:
-            logger.error("Failed to load InceptionResnetV1: %s", error)
-            self.model = None
+            logger.error("Failed to load FaceNet model: %s", error)
+            self.embedding_model = None
 
         self.transform = transforms.Compose(
             [
@@ -57,39 +40,55 @@ class EfficientEmbeddingEngine:
             ]
         )
 
-    def generate_search_embeddings(
-        self,
-        image_data: bytes,
-        timestamp: int,
-        filename: str,
-        camera_location: str,
-    ) -> Dict[str, bytes]:
-        """Generate embeddings for face, time, and metadata to support RAG queries."""
-        embeddings: Dict[str, bytes] = {}
+    def generate_embeddings(self, image_data: bytes) -> Optional[List[Dict[str, Any]]]:
+        """Detect faces and generate embeddings for each face."""
+        if self.face_detector is None or self.embedding_model is None:
+            logger.error("Models not initialized properly.")
+            return None
+
         try:
-            image = Image.open(np.frombuffer(image_data, np.uint8)).convert("RGB")
-            tensor_image = self.transform(image).unsqueeze(0)
+            # Decode image
+            image_array = np.frombuffer(image_data, np.uint8)
+            image = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
+            if image is None:
+                logger.error("Invalid image data.")
+                return None
 
-            with torch.no_grad():
-                embedding_tensor = self.model(tensor_image)
-                face_embedding = embedding_tensor.squeeze().numpy().astype(np.float32)
-                embeddings["face_embedding"] = face_embedding.tobytes()
-                embeddings["face_count"] = np.array([1.0], dtype=np.float32).tobytes()
-                embeddings["vehicle_score"] = np.array(
-                    [0.0], dtype=np.float32
-                ).tobytes()
+            # Run YOLO detection
+            results = self.face_detector(image)
+            boxes = results[0].boxes.xyxy.cpu().numpy() if len(results) > 0 else []
 
-            metadata_text = f"{filename} {camera_location} {timestamp}"
-            metadata_embedding = np.mean([ord(c) for c in metadata_text]).astype(
-                np.float32
-            )
-            embeddings["metadata_embedding"] = np.array(
-                [metadata_embedding], dtype=np.float32
-            ).tobytes()
+            if len(boxes) == 0:
+                logger.debug("No faces detected.")
+                return None
 
-            logger.debug("Generated search embeddings for %s", filename)
-            return embeddings
+            face_embeddings: List[Dict[str, Any]] = []
+
+            for i, (x1, y1, x2, y2) in enumerate(boxes):
+                # Crop and preprocess face
+                x1, y1, x2, y2 = map(int, [x1, y1, x2, y2])
+                cropped_face = image[y1:y2, x1:x2]
+                face_rgb = cv2.cvtColor(cropped_face, cv2.COLOR_BGR2RGB)
+                pil_image = Image.fromarray(face_rgb)
+                tensor_image = self.transform(pil_image).unsqueeze(0)
+
+                with torch.no_grad():
+                    embedding_tensor = self.embedding_model(tensor_image)
+                    face_embedding = (
+                        embedding_tensor.squeeze().numpy().astype(np.float32)
+                    )
+
+                face_embeddings.append(
+                    {
+                        "face_index": i,
+                        "bbox": [x1, y1, x2, y2],
+                        "embedding": face_embedding.tobytes(),
+                    }
+                )
+
+            logger.info("Generated %d face embeddings.", len(face_embeddings))
+            return face_embeddings
 
         except Exception as error:
-            logger.error("Failed to generate embeddings for %s: %s", filename, error)
-            return {}
+            logger.error("Failed to generate embeddings: %s", error)
+            return None
