@@ -38,8 +38,7 @@ COPY . /app/
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Add a simple health check (adjust the URL to your app)
-HEALTHCHECK --interval=60s --timeout=10s --start-period=60s --retries=3 \
-  CMD bash -c 'test $(($(date +%s) - $(cat /tmp/healthcheck.txt 2>/dev/null || echo 0))) -lt 120'
-
+HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
+  CMD curl -f http://localhost:5000/health || exit 1
 
 CMD ["python", "main.py"]

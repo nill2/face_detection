@@ -1,94 +1,94 @@
-"""Unified embedding engine for detecting faces and generating embeddings efficiently."""
+"""Lightweight embedding engine using YOLO for face detection and embedding extraction."""
 
 import logging
-from typing import List, Dict, Any, Optional
+from pathlib import Path
 import numpy as np
-import torch
 from ultralytics import YOLO
-from torchvision import transforms
-from facenet_pytorch import InceptionResnetV1
 import cv2
-from PIL import Image
+from typing import Dict
 
 logger = logging.getLogger(__name__)
 
 
-class FaceEmbeddingEngine:
-    """Unified engine combining YOLO face detection and FaceNet embeddings."""
+class EmbeddingEngine:
+    """Unified face embedding engine using YOLOv8-face."""
 
     def __init__(self, model_path: str = "yolov8n-face.pt") -> None:
-        """Initialize YOLO and FaceNet models."""
+        """Load YOLOv8-face model immediately."""
         try:
-            self.face_detector = YOLO(model_path)
-            logger.info("Loaded YOLO face detector: %s", model_path)
+            models_dir = Path(__file__).resolve().parent / "models"
+            models_dir.mkdir(parents=True, exist_ok=True)
+            local_model_path = models_dir / Path(model_path).name
+
+            if not local_model_path.exists():
+                import requests
+
+                logger.info("Downloading YOLO face model...")
+                url = (
+                    "https://github.com/akanametov/yolov8-face/releases/download/"
+                    "v0.0.0/yolov8n-face.pt"
+                )
+                response = requests.get(url, stream=True, timeout=60)
+                response.raise_for_status()
+                with open(local_model_path, "wb") as file:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        file.write(chunk)
+                logger.info("Model downloaded to %s", local_model_path)
+
+            self.model = YOLO(str(local_model_path))
+            logger.info("YOLOv8-face model loaded successfully.")
+
         except Exception as error:
             logger.error("Failed to load YOLO model: %s", error)
-            self.face_detector = None
+            self.model = None
+
+    def generate_face_embeddings(self, image_data: bytes) -> Dict[str, bytes]:
+        """Detect faces and generate compact embeddings from YOLO face boxes."""
+        embeddings: Dict[str, bytes] = {}
+
+        if self.model is None:
+            logger.error("YOLO model not available.")
+            return embeddings
 
         try:
-            self.embedding_model = InceptionResnetV1(pretrained="vggface2").eval()
-            logger.info("Loaded FaceNet embedding model.")
-        except Exception as error:
-            logger.error("Failed to load FaceNet model: %s", error)
-            self.embedding_model = None
+            np_img = np.frombuffer(image_data, np.uint8)
+            img = cv2.imdecode(np_img, cv2.IMREAD_COLOR)
 
-        self.transform = transforms.Compose(
-            [
-                transforms.Resize((160, 160)),
-                transforms.ToTensor(),
-                transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
-            ]
-        )
+            if img is None:
+                logger.warning("Invalid image data.")
+                return embeddings
 
-    def generate_embeddings(self, image_data: bytes) -> Optional[List[Dict[str, Any]]]:
-        """Detect faces and generate embeddings for each face."""
-        if self.face_detector is None or self.embedding_model is None:
-            logger.error("Models not initialized properly.")
-            return None
+            results = self.model(img, verbose=False)
+            if not results or not results[0].boxes:
+                embeddings["face_count"] = np.array([0], dtype=np.float32).tobytes()
+                return embeddings
 
-        try:
-            # Decode image
-            image_array = np.frombuffer(image_data, np.uint8)
-            image = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
-            if image is None:
-                logger.error("Invalid image data.")
-                return None
-
-            # Run YOLO detection
-            results = self.face_detector(image)
-            boxes = results[0].boxes.xyxy.cpu().numpy() if len(results) > 0 else []
-
-            if len(boxes) == 0:
-                logger.debug("No faces detected.")
-                return None
-
-            face_embeddings: List[Dict[str, Any]] = []
-
-            for i, (x1, y1, x2, y2) in enumerate(boxes):
-                # Crop and preprocess face
-                x1, y1, x2, y2 = map(int, [x1, y1, x2, y2])
-                cropped_face = image[y1:y2, x1:x2]
-                face_rgb = cv2.cvtColor(cropped_face, cv2.COLOR_BGR2RGB)
-                pil_image = Image.fromarray(face_rgb)
-                tensor_image = self.transform(pil_image).unsqueeze(0)
-
-                with torch.no_grad():
-                    embedding_tensor = self.embedding_model(tensor_image)
-                    face_embedding = (
-                        embedding_tensor.squeeze().numpy().astype(np.float32)
-                    )
-
-                face_embeddings.append(
-                    {
-                        "face_index": i,
-                        "bbox": [x1, y1, x2, y2],
-                        "embedding": face_embedding.tobytes(),
-                    }
+            boxes = results[0].boxes.xywh.cpu().numpy()
+            faces = []
+            for x, y, w, h in boxes:
+                x1, y1, x2, y2 = (
+                    int(x - w / 2),
+                    int(y - h / 2),
+                    int(x + w / 2),
+                    int(y + h / 2),
                 )
+                face = img[y1:y2, x1:x2]
+                if face.size > 0:
+                    faces.append(cv2.resize(face, (64, 64)))
 
-            logger.info("Generated %d face embeddings.", len(face_embeddings))
-            return face_embeddings
+            if not faces:
+                embeddings["face_count"] = np.array([0], dtype=np.float32).tobytes()
+                return embeddings
+
+            faces_np = np.stack(faces)
+            face_embedding = faces_np.mean(axis=(0, 1, 2)).astype(np.float32)
+            embeddings["face_embedding"] = face_embedding.tobytes()
+            embeddings["face_count"] = np.array(
+                [len(faces_np)], dtype=np.float32
+            ).tobytes()
+
+            return embeddings
 
         except Exception as error:
-            logger.error("Failed to generate embeddings: %s", error)
-            return None
+            logger.error("Error generating face embeddings: %s", error)
+            return {}
