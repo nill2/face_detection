@@ -36,6 +36,11 @@ class PhotoProcessor:
         self.latest_processed_date: int = 0
         self.embedding_engine = EmbeddingEngine()
 
+        self.meta_collection = self.connect_to_mongodb(
+            MONGO_DB, FACE_COLLECTION + "_meta"
+        )
+        self.load_last_processed_date()
+
     def connect_to_mongodb(
         self, db_name: str, collection_name: str
     ) -> Optional[Collection]:
@@ -49,8 +54,42 @@ class PhotoProcessor:
                 client = MongoClient(MONGO_HOST, MONGO_PORT)
             return client[db_name][collection_name]
         except ConnectionFailure as e:
-            logger.error("Failed to connect to MongoDB: %s", str(e))
+            logger.error("Failed to connect to MongoDB: %s", e)
             return None
+
+    def load_last_processed_date(self) -> None:
+        """Load the last processed timestamp from MongoDB."""
+        if not self.meta_collection:
+            logger.warning("Meta collection unavailable, starting from scratch.")
+            return
+        try:
+            state = self.meta_collection.find_one({"_id": "latest_processed_state"})
+            if state:
+                self.latest_processed_date = int(state.get("latest_date", 0))
+                logger.info(
+                    "Resuming from last processed timestamp: %d",
+                    self.latest_processed_date,
+                )
+            else:
+                logger.info("No previous state found, starting fresh.")
+        except PyMongoError as e:
+            logger.error("Failed to load meta state: %s", e)
+
+    def save_last_processed_date(self) -> None:
+        """Save the last processed timestamp to MongoDB."""
+        if not self.meta_collection:
+            return
+        try:
+            self.meta_collection.update_one(
+                {"_id": "latest_processed_state"},
+                {"$set": {"latest_date": self.latest_processed_date}},
+                upsert=True,
+            )
+            logger.debug(
+                "Saved last processed timestamp: %d", self.latest_processed_date
+            )
+        except PyMongoError as e:
+            logger.error("Failed to update meta state: %s", e)
 
     def process_photos(self) -> None:
         """Process new photos from the main collection and store embeddings."""
@@ -65,11 +104,9 @@ class PhotoProcessor:
         logger.info("Found %d new photos to process.", len(photos))
 
         for photo in photos:
-            filename = photo.get("filename", "<unknown>")
             try:
                 image_data = photo.get("data")
                 if not image_data:
-                    logger.warning("Photo %s has no data, skipping.", filename)
                     continue
 
                 embeddings = self.embedding_engine.generate_face_embeddings(image_data)
@@ -79,11 +116,11 @@ class PhotoProcessor:
                     )[0]
                 )
                 if face_count == 0:
-                    logger.info("No faces detected in %s, skipping.", filename)
                     continue
 
                 document = {
-                    "filename": filename,
+                    "filename": photo.get("filename", ""),
+                    # Don't log raw binary; only store in DB
                     "data": image_data,
                     "search_embeddings": embeddings,
                     "s3_file_url": photo.get("s3_file_url", ""),
@@ -97,8 +134,8 @@ class PhotoProcessor:
 
                 face_collection.insert_one(document)
                 logger.info(
-                    "Processed and stored photo %s with %d faces.",
-                    filename,
+                    "Processed and stored photo '%s' with %d faces.",
+                    photo.get("filename"),
                     face_count,
                 )
                 self.latest_processed_date = max(
@@ -106,31 +143,29 @@ class PhotoProcessor:
                 )
 
             except PyMongoError as e:
-                logger.error("MongoDB error while processing %s: %s", filename, str(e))
-            except Exception as e:
-                # Avoid dumping binary blobs into logs
-                error_type = type(e).__name__
-                error_msg = str(e)
-                if len(error_msg) > 300:
-                    error_msg = error_msg[:300] + "... [truncated]"
                 logger.error(
-                    "Unexpected error processing photo %s: %s - %s",
-                    filename,
-                    error_type,
-                    error_msg,
+                    "MongoDB error while inserting photo '%s': %s",
+                    photo.get("filename"),
+                    e,
+                )
+            except Exception as e:
+                logger.error(
+                    "Unexpected error processing '%s': %s", photo.get("filename"), e
                 )
 
-        # Cleanup step
+        # persist state
+        self.save_last_processed_date()
+        # cleanup
         self.delete_old_faces(face_collection)
 
     def delete_old_faces(self, face_collection: Collection) -> None:
-        """Delete old faces."""
+        """Delete old face documents from the collection."""
         try:
             threshold = time.time() - (FACES_HISTORY_DAYS * 86400)
             result = face_collection.delete_many({"date": {"$lt": threshold}})
             logger.info("Deleted %d old records.", result.deleted_count)
         except PyMongoError as e:
-            logger.error("Error deleting old records: %s", str(e))
+            logger.error("Error deleting old records: %s", e)
 
 
 @app.route("/health", methods=["GET"])  # type: ignore[misc]
