@@ -36,7 +36,8 @@ class PhotoProcessor:
         self.latest_processed_date: int = 0
         self.embedding_engine = EmbeddingEngine()
 
-        self.meta_collection = self.connect_to_mongodb(
+        # Meta collection for storing last processed timestamp
+        self.meta_collection: Optional[Collection] = self.connect_to_mongodb(
             MONGO_DB, FACE_COLLECTION + "_meta"
         )
         self.load_last_processed_date()
@@ -59,7 +60,7 @@ class PhotoProcessor:
 
     def load_last_processed_date(self) -> None:
         """Load the last processed timestamp from MongoDB."""
-        if not self.meta_collection:
+        if self.meta_collection is None:
             logger.warning("Meta collection unavailable, starting from scratch.")
             return
         try:
@@ -77,7 +78,7 @@ class PhotoProcessor:
 
     def save_last_processed_date(self) -> None:
         """Save the last processed timestamp to MongoDB."""
-        if not self.meta_collection:
+        if self.meta_collection is None:
             return
         try:
             self.meta_collection.update_one(
@@ -95,10 +96,12 @@ class PhotoProcessor:
         """Process new photos from the main collection and store embeddings."""
         main_collection = self.connect_to_mongodb(MONGO_DB, MONGO_COLLECTION)
         face_collection = self.connect_to_mongodb(MONGO_DB, FACE_COLLECTION)
-        if not main_collection or not face_collection:
+
+        if main_collection is None or face_collection is None:
             logger.error("MongoDB collections unavailable.")
             return
 
+        # Query only new photos
         query = {"date": {"$gt": self.latest_processed_date}}
         photos = list(main_collection.find(query).sort("date", DESCENDING))
         logger.info("Found %d new photos to process.", len(photos))
@@ -115,13 +118,13 @@ class PhotoProcessor:
                         embeddings.get("face_count", b"\x00\x00\x00\x00"), np.float32
                     )[0]
                 )
+
                 if face_count == 0:
                     continue
 
                 document = {
                     "filename": photo.get("filename", ""),
-                    # Don't log raw binary; only store in DB
-                    "data": image_data,
+                    "data": image_data,  # Stored in DB, not logged
                     "search_embeddings": embeddings,
                     "s3_file_url": photo.get("s3_file_url", ""),
                     "size": photo.get("size", 0),
@@ -138,6 +141,8 @@ class PhotoProcessor:
                     photo.get("filename"),
                     face_count,
                 )
+
+                # Update latest processed timestamp
                 self.latest_processed_date = max(
                     photo.get("date", 0), self.latest_processed_date
                 )
@@ -153,9 +158,9 @@ class PhotoProcessor:
                     "Unexpected error processing '%s': %s", photo.get("filename"), e
                 )
 
-        # persist state
+        # Persist last processed state
         self.save_last_processed_date()
-        # cleanup
+        # Cleanup old data
         self.delete_old_faces(face_collection)
 
     def delete_old_faces(self, face_collection: Collection) -> None:
