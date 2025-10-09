@@ -1,4 +1,4 @@
-"""Lightweight embedding engine using YOLO for face detection and embedding extraction."""
+"""Lightweight embedding engine using YOLO for face detection and embedding extraction with annotated output."""
 
 import logging
 from pathlib import Path
@@ -6,6 +6,7 @@ import numpy as np
 from ultralytics import YOLO
 import cv2
 from typing import Dict
+import uuid
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +44,7 @@ class EmbeddingEngine:
             self.model = None
 
     def generate_face_embeddings(self, image_data: bytes) -> Dict[str, bytes]:
-        """Detect faces and generate compact embeddings from YOLO face boxes."""
+        """Detect faces, generate embeddings, and save annotated image with rectangles."""
         embeddings: Dict[str, bytes] = {}
 
         if self.model is None:
@@ -51,6 +52,7 @@ class EmbeddingEngine:
             return embeddings
 
         try:
+            # Decode image from bytes
             np_img = np.frombuffer(image_data, np.uint8)
             img = cv2.imdecode(np_img, cv2.IMREAD_COLOR)
 
@@ -60,6 +62,7 @@ class EmbeddingEngine:
 
             h_img, w_img = img.shape[:2]
 
+            # Run YOLO inference
             results = self.model(img, verbose=False)
             if not results or not results[0].boxes:
                 embeddings["face_count"] = np.array([0], dtype=np.float32).tobytes()
@@ -74,6 +77,9 @@ class EmbeddingEngine:
                 if x2 <= x1 or y2 <= y1:
                     continue
 
+                # Draw red rectangle for visualization
+                cv2.rectangle(img, (x1, y1), (x2, y2), (0, 0, 255), 2)
+
                 face_crop = img[y1:y2, x1:x2]
                 if face_crop is None or face_crop.size == 0:
                     continue
@@ -85,6 +91,7 @@ class EmbeddingEngine:
                 embeddings["face_count"] = np.array([0], dtype=np.float32).tobytes()
                 return embeddings
 
+            # Compute lightweight embedding
             faces_np = np.stack(faces)
             face_embedding = faces_np.mean(axis=(0, 1, 2)).astype(np.float32)
             embeddings["face_embedding"] = face_embedding.tobytes()
@@ -92,7 +99,21 @@ class EmbeddingEngine:
                 [len(faces_np)], dtype=np.float32
             ).tobytes()
 
-            logger.info("✅ Generated embeddings for %d face(s).", len(faces_np))
+            # Save annotated image for reference
+            annotated_dir = Path("/app/processed_faces")
+            annotated_dir.mkdir(parents=True, exist_ok=True)
+            annotated_path = annotated_dir / f"faces_{uuid.uuid4().hex}.jpg"
+
+            success = cv2.imwrite(str(annotated_path), img)
+            if success:
+                logger.info(
+                    "✅ Generated embeddings for %d face(s). Annotated image saved to: %s",
+                    len(faces_np),
+                    annotated_path,
+                )
+            else:
+                logger.warning("⚠️ Failed to save annotated image for this photo.")
+
             return embeddings
 
         except Exception as error:
