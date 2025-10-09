@@ -1,4 +1,4 @@
-"""Photo processing service with YOLO-based face detection, embedding storage, and known-face matching."""
+"""Photo processing service with OpenCV prefilter, YOLO-based face detection, and annotated face storage."""
 
 import logging
 import time
@@ -10,6 +10,7 @@ from pymongo.collection import Collection
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
 from flask import Flask, jsonify, Response
+import cv2
 import warnings
 
 from .config import (
@@ -35,8 +36,27 @@ warnings.filterwarnings("ignore", message="Corrupt JPEG data")
 app = Flask(__name__)
 
 
+def detect_faces_opencv(image_data: bytes) -> bool:
+    """Quick prefilter using OpenCV to detect if faces are present."""
+    try:
+        np_img = np.frombuffer(image_data, np.uint8)
+        img = cv2.imdecode(np_img, cv2.IMREAD_COLOR)
+        if img is None:
+            return False
+
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        face_cascade = cv2.CascadeClassifier(
+            cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+        )
+        faces = face_cascade.detectMultiScale(gray, 1.2, 4)
+        return len(faces) > 0
+    except Exception as e:
+        logger.error("OpenCV face detection failed: %s", e)
+        return False
+
+
 class PhotoProcessor:
-    """Unified photo processor using YOLO embeddings for faces and known-face matching."""
+    """Unified photo processor using OpenCV prefilter + YOLO embeddings for faces."""
 
     def __init__(self) -> None:
         """Initialize the PhotoProcessor."""
@@ -134,7 +154,6 @@ class PhotoProcessor:
             logger.error("MongoDB collections unavailable.")
             return
 
-        # Support both int timestamps and datetime in DB
         query_date = (
             datetime.fromtimestamp(self.latest_processed_date)
             if self.latest_processed_date > 0
@@ -152,86 +171,73 @@ class PhotoProcessor:
 
         for photo in photos:
             filename = photo.get("filename", "unknown")
-            try:
-                image_data = photo.get("data")
-                if not image_data:
-                    logger.warning(f"⚠️ No image data in '{filename}', skipping.")
-                    continue
-
-                logger.info(f"➡️ Generating embeddings for '{filename}'...")
-                try:
-                    embeddings = self.embedding_engine.generate_face_embeddings(
-                        image_data
-                    )
-                    if not embeddings:
-                        logger.warning(
-                            f"⚠️ Empty embeddings for '{filename}', skipping."
-                        )
-                        continue
-                except Exception as e:
-                    logger.error(f"❌ EmbeddingEngine crashed on '{filename}': {e}")
-                    continue
-
-                # Face count safety
-                face_count = int(embeddings.get("face_count", 0))
-                if face_count == 0:
-                    logger.info(f"No faces detected in '{filename}', skipping.")
-                    continue
-
-                # --- Match against known faces ---
-                matched_names: List[str] = []
-                if "face_embedding" in embeddings and self.known_faces:
-                    current_emb = np.array(
-                        embeddings["face_embedding"], dtype=np.float32
-                    ).reshape(1, -1)
-                    for name, known_emb in self.known_faces.items():
-                        similarity = cosine_similarity(
-                            current_emb, known_emb.reshape(1, -1)
-                        )[0][0]
-                        if similarity > 0.85:
-                            matched_names.append(name)
-                            logger.info(
-                                f"✅ Match found in '{filename}': {name} (similarity={similarity:.3f})"
-                            )
-
-                # --- Store processed result ---
-                document = {
-                    "filename": filename,
-                    "data": image_data,
-                    "search_embeddings": embeddings,
-                    "s3_file_url": photo.get("s3_file_url", ""),
-                    "size": photo.get("size", 0),
-                    "date": photo.get("date", 0),
-                    "camera_location": photo.get("camera_location", ""),
-                    "has_faces": True,
-                    "face_count": face_count,
-                    "matched_persons": matched_names,
-                    "processing_timestamp": time.time(),
-                }
-
-                face_collection.insert_one(document)
-                logger.info(
-                    f"Processed '{filename}' with {face_count} faces. Matches: {matched_names or 'None'}"
-                )
-
-                # Update last processed timestamp
-                photo_date = photo.get("date", 0)
-                if isinstance(photo_date, datetime):
-                    photo_ts = int(photo_date.timestamp())
-                else:
-                    photo_ts = int(photo_date)
-                self.latest_processed_date = max(photo_ts, self.latest_processed_date)
-
-            except PyMongoError as e:
-                logger.error(f"MongoDB error while inserting '{filename}': {e}")
-            except Exception as e:
-                logger.error(f"Unexpected error processing '{filename}': {e}")
+            image_data = photo.get("data")
+            if not image_data:
+                logger.warning(f"⚠️ No image data in '{filename}', skipping.")
                 continue
 
-        # Persist last processed state
-        self.save_last_processed_date()
+            # Step 1 — OpenCV prefilter
+            if not detect_faces_opencv(image_data):
+                logger.info(
+                    f"No faces detected by OpenCV in '{filename}', skipping YOLO."
+                )
+                continue
 
-        # Cleanup old data
+            # Step 2 — YOLO embeddings
+            embeddings = self.embedding_engine.generate_face_embeddings(image_data)
+            if not embeddings or embeddings.get("face_count", 0) == 0:
+                logger.info(f"No faces confirmed by YOLO in '{filename}', skipping.")
+                continue
+
+            # Step 3 — Known face matching
+            matched_names: List[str] = []
+            if "face_embedding" in embeddings and self.known_faces:
+                current_emb = np.array(
+                    embeddings["face_embedding"], dtype=np.float32
+                ).reshape(1, -1)
+                for name, known_emb in self.known_faces.items():
+                    similarity = cosine_similarity(
+                        current_emb, known_emb.reshape(1, -1)
+                    )[0][0]
+                    if similarity > 0.85:
+                        matched_names.append(name)
+                        logger.info(
+                            f"✅ Match found in '{filename}': {name} (similarity={similarity:.3f})"
+                        )
+
+            # Step 4 — Build document
+            annotated_bytes = embeddings.get("annotated_bytes")
+            document = {
+                "filename": filename,
+                "data": annotated_bytes if annotated_bytes else image_data,
+                "search_embeddings": embeddings,
+                "s3_file_url": photo.get("s3_file_url", ""),
+                "size": photo.get("size", 0),
+                "date": photo.get("date", 0),
+                "camera_location": photo.get("camera_location", ""),
+                "has_faces": True,
+                "face_count": embeddings.get("face_count", 0),
+                "matched_persons": matched_names,
+                "processing_timestamp": time.time(),
+            }
+
+            try:
+                face_collection.insert_one(document)
+                logger.info(
+                    f"Stored '{filename}' with {document['face_count']} faces. Matches: {matched_names or 'None'}"
+                )
+            except PyMongoError as e:
+                logger.error(f"MongoDB error while inserting '{filename}': {e}")
+
+            # Update timestamp
+            photo_date = photo.get("date", 0)
+            if isinstance(photo_date, datetime):
+                photo_ts = int(photo_date.timestamp())
+            else:
+                photo_ts = int(photo_date)
+            self.latest_processed_date = max(photo_ts, self.latest_processed_date)
+
+        self.save_last_processed_date()
         self.delete_old_faces(face_collection)
 
     # --- Cleanup ---
@@ -258,5 +264,5 @@ if __name__ == "__main__":
     while True:
         logger.info("Running photo processing...")
         processor.process_photos()
-        logger.info("Waiting for 30 seconds before the next run...")
+        logger.info("Waiting 30 seconds before next run...")
         time.sleep(30)

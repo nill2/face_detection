@@ -1,4 +1,4 @@
-"""Lightweight embedding engine using YOLO for face detection and embedding extraction with annotated output."""
+"""Lightweight embedding engine using YOLO for face detection, embedding extraction, and annotated output."""
 
 import logging
 from pathlib import Path
@@ -6,13 +6,14 @@ import numpy as np
 from ultralytics import YOLO
 import cv2
 from typing import Any, Dict
-import uuid
+
+# import uuid
 
 logger = logging.getLogger(__name__)
 
 
 class EmbeddingEngine:
-    """Unified face embedding engine using YOLOv8-face."""
+    """Face embedding engine using YOLOv8-face."""
 
     def __init__(self, model_path: str = "yolov8n-face.pt") -> None:
         """Load YOLOv8-face model."""
@@ -38,13 +39,12 @@ class EmbeddingEngine:
 
             self.model = YOLO(str(local_model_path))
             logger.info("YOLOv8-face model loaded successfully.")
-
         except Exception as error:
             logger.error("Failed to load YOLO model: %s", error)
             self.model = None
 
     def generate_face_embeddings(self, image_data: bytes) -> Dict[str, Any]:
-        """Detect faces, generate embeddings, and save annotated image with rectangles."""
+        """Detect faces, generate embeddings, and return annotated image bytes."""
         embeddings: Dict[str, Any] = {}
 
         if self.model is None:
@@ -52,20 +52,18 @@ class EmbeddingEngine:
             return embeddings
 
         try:
-            # Decode image from bytes
+            # Decode image
             np_img = np.frombuffer(image_data, np.uint8)
             img = cv2.imdecode(np_img, cv2.IMREAD_COLOR)
-
             if img is None:
                 logger.warning("Invalid image data.")
                 return embeddings
 
             h_img, w_img = img.shape[:2]
-
-            # Run YOLO inference
             results = self.model(img, verbose=False)
+
             if not results or not results[0].boxes:
-                embeddings["face_count"] = np.array([0], dtype=np.float32).tobytes()
+                embeddings["face_count"] = 0
                 return embeddings
 
             faces = []
@@ -73,13 +71,11 @@ class EmbeddingEngine:
                 x1, y1, x2, y2 = map(int, box[:4])
                 x1, y1 = max(0, x1), max(0, y1)
                 x2, y2 = min(w_img, x2), min(h_img, y2)
-
                 if x2 <= x1 or y2 <= y1:
                     continue
 
-                # Draw red rectangle for visualization
+                # Draw rectangle
                 cv2.rectangle(img, (x1, y1), (x2, y2), (0, 0, 255), 2)
-
                 face_crop = img[y1:y2, x1:x2]
                 if face_crop is None or face_crop.size == 0:
                     continue
@@ -88,30 +84,22 @@ class EmbeddingEngine:
                 faces.append(resized)
 
             if not faces:
-                embeddings["face_count"] = np.array([0], dtype=np.float32).tobytes()
+                embeddings["face_count"] = 0
                 return embeddings
 
-            # Compute lightweight embedding
             faces_np = np.stack(faces)
             face_embedding = faces_np.mean(axis=(0, 1, 2)).astype(np.float32)
             embeddings["face_embedding"] = face_embedding.tolist()
             embeddings["face_count"] = len(faces_np)
 
-            # Save annotated image for reference
-            annotated_dir = Path("/app/processed_faces")
-            annotated_dir.mkdir(parents=True, exist_ok=True)
-            annotated_path = annotated_dir / f"faces_{uuid.uuid4().hex}.jpg"
+            # Encode annotated image for Mongo
+            _, annotated_bytes = cv2.imencode(".jpg", img)
+            embeddings["annotated_bytes"] = annotated_bytes.tobytes()
 
-            success = cv2.imwrite(str(annotated_path), img)
-            if success:
-                logger.info(
-                    "✅ Generated embeddings for %d face(s). Annotated image saved to: %s",
-                    len(faces_np),
-                    annotated_path,
-                )
-            else:
-                logger.warning("⚠️ Failed to save annotated image for this photo.")
-
+            logger.info(
+                "✅ Generated embeddings for %d face(s). Annotated image ready.",
+                len(faces_np),
+            )
             return embeddings
 
         except Exception as error:
