@@ -2,6 +2,7 @@
 
 import logging
 import time
+from datetime import datetime
 from typing import Optional, Dict, Any, Tuple, List
 from pymongo import MongoClient, DESCENDING
 from pymongo.errors import ConnectionFailure, PyMongoError
@@ -9,6 +10,7 @@ from pymongo.collection import Collection
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
 from flask import Flask, jsonify, Response
+import warnings
 
 from .config import (
     MONGO_HOST,
@@ -26,6 +28,9 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+# Suppress noisy libjpeg warnings
+warnings.filterwarnings("ignore", message="Corrupt JPEG data")
 
 app = Flask(__name__)
 
@@ -129,45 +134,69 @@ class PhotoProcessor:
             logger.error("MongoDB collections unavailable.")
             return
 
-        # Query only new photos
-        query = {"date": {"$gt": self.latest_processed_date}}
+        # Support both int timestamps and datetime in DB
+        query_date = (
+            datetime.fromtimestamp(self.latest_processed_date)
+            if self.latest_processed_date > 0
+            else datetime.fromtimestamp(0)
+        )
+        query = {
+            "$or": [
+                {"date": {"$gt": self.latest_processed_date}},
+                {"date": {"$gt": query_date}},
+            ]
+        }
+
         photos = list(main_collection.find(query).sort("date", DESCENDING))
         logger.info("Found %d new photos to process.", len(photos))
 
         for photo in photos:
+            filename = photo.get("filename", "unknown")
             try:
                 image_data = photo.get("data")
                 if not image_data:
+                    logger.warning(f"⚠️ No image data in '{filename}', skipping.")
                     continue
 
-                embeddings = self.embedding_engine.generate_face_embeddings(image_data)
-                face_count = int(
-                    np.frombuffer(
-                        embeddings.get("face_count", b"\x00\x00\x00\x00"), np.float32
-                    )[0]
-                )
+                logger.info(f"➡️ Generating embeddings for '{filename}'...")
+                try:
+                    embeddings = self.embedding_engine.generate_face_embeddings(
+                        image_data
+                    )
+                    if not embeddings:
+                        logger.warning(
+                            f"⚠️ Empty embeddings for '{filename}', skipping."
+                        )
+                        continue
+                except Exception as e:
+                    logger.error(f"❌ EmbeddingEngine crashed on '{filename}': {e}")
+                    continue
 
+                # Face count safety
+                face_count = int(embeddings.get("face_count", 0))
                 if face_count == 0:
+                    logger.info(f"No faces detected in '{filename}', skipping.")
                     continue
 
                 # --- Match against known faces ---
                 matched_names: List[str] = []
                 if "face_embedding" in embeddings and self.known_faces:
-                    current_emb = np.frombuffer(
-                        embeddings["face_embedding"], np.float32
+                    current_emb = np.array(
+                        embeddings["face_embedding"], dtype=np.float32
                     ).reshape(1, -1)
                     for name, known_emb in self.known_faces.items():
                         similarity = cosine_similarity(
                             current_emb, known_emb.reshape(1, -1)
                         )[0][0]
-                        if similarity > 0.85:  # adjust threshold
+                        if similarity > 0.85:
                             matched_names.append(name)
                             logger.info(
-                                f"✅ Match found in '{photo.get('filename')}': {name} (similarity={similarity:.3f})"
+                                f"✅ Match found in '{filename}': {name} (similarity={similarity:.3f})"
                             )
 
+                # --- Store processed result ---
                 document = {
-                    "filename": photo.get("filename", ""),
+                    "filename": filename,
                     "data": image_data,
                     "search_embeddings": embeddings,
                     "s3_file_url": photo.get("s3_file_url", ""),
@@ -182,30 +211,26 @@ class PhotoProcessor:
 
                 face_collection.insert_one(document)
                 logger.info(
-                    "Processed and stored photo '%s' with %d faces. Matches: %s",
-                    photo.get("filename"),
-                    face_count,
-                    matched_names or "None",
+                    f"Processed '{filename}' with {face_count} faces. Matches: {matched_names or 'None'}"
                 )
 
-                # Update latest processed timestamp
-                self.latest_processed_date = max(
-                    photo.get("date", 0), self.latest_processed_date
-                )
+                # Update last processed timestamp
+                photo_date = photo.get("date", 0)
+                if isinstance(photo_date, datetime):
+                    photo_ts = int(photo_date.timestamp())
+                else:
+                    photo_ts = int(photo_date)
+                self.latest_processed_date = max(photo_ts, self.latest_processed_date)
 
             except PyMongoError as e:
-                logger.error(
-                    "MongoDB error while inserting photo '%s': %s",
-                    photo.get("filename"),
-                    e,
-                )
+                logger.error(f"MongoDB error while inserting '{filename}': {e}")
             except Exception as e:
-                logger.error(
-                    "Unexpected error processing '%s': %s", photo.get("filename"), e
-                )
+                logger.error(f"Unexpected error processing '{filename}': {e}")
+                continue
 
         # Persist last processed state
         self.save_last_processed_date()
+
         # Cleanup old data
         self.delete_old_faces(face_collection)
 
@@ -231,5 +256,7 @@ if __name__ == "__main__":
     logger.info("Starting face detection processor service...")
     processor = PhotoProcessor()
     while True:
+        logger.info("Running photo processing...")
         processor.process_photos()
-        time.sleep(60)
+        logger.info("Waiting for 30 seconds before the next run...")
+        time.sleep(30)
