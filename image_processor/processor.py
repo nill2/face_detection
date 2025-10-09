@@ -1,12 +1,13 @@
-"""Photo processing service with YOLO-based face detection and MongoDB integration."""
+"""Photo processing service with YOLO-based face detection, embedding storage, and known-face matching."""
 
 import logging
 import time
-from typing import Optional, Dict, Any, Tuple
+from typing import Optional, Dict, Any, Tuple, List
 from pymongo import MongoClient, DESCENDING
 from pymongo.errors import ConnectionFailure, PyMongoError
 from pymongo.collection import Collection
 import numpy as np
+from sklearn.metrics.pairwise import cosine_similarity
 from flask import Flask, jsonify, Response
 
 from .config import (
@@ -19,6 +20,7 @@ from .config import (
 )
 from .embeddings import EmbeddingEngine
 
+# --- Logging setup ---
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -29,7 +31,7 @@ app = Flask(__name__)
 
 
 class PhotoProcessor:
-    """Unified photo processor using YOLO embeddings for faces."""
+    """Unified photo processor using YOLO embeddings for faces and known-face matching."""
 
     def __init__(self) -> None:
         """Initialize the PhotoProcessor."""
@@ -42,6 +44,13 @@ class PhotoProcessor:
         )
         self.load_last_processed_date()
 
+        # Known faces
+        self.known_faces_collection = self.connect_to_mongodb(
+            MONGO_DB, "nill-known-faces"
+        )
+        self.known_faces = self.load_known_faces()
+
+    # --- MongoDB utilities ---
     def connect_to_mongodb(
         self, db_name: str, collection_name: str
     ) -> Optional[Collection]:
@@ -58,6 +67,24 @@ class PhotoProcessor:
             logger.error("Failed to connect to MongoDB: %s", e)
             return None
 
+    # --- Known face loading ---
+    def load_known_faces(self) -> Dict[str, np.ndarray]:
+        """Load all known face embeddings from MongoDB."""
+        known: Dict[str, np.ndarray] = {}
+        if self.known_faces_collection is None:
+            logger.warning("No known_faces_collection available.")
+            return {}
+
+        try:
+            for doc in self.known_faces_collection.find({}):
+                if "embedding" in doc and isinstance(doc["embedding"], list):
+                    known[doc["name"]] = np.array(doc["embedding"], dtype=np.float32)
+            logger.info(f"✅ Loaded {len(known)} known faces: {list(known.keys())}")
+        except PyMongoError as e:
+            logger.error("Failed to load known faces: %s", e)
+        return known
+
+    # --- Meta state handling ---
     def load_last_processed_date(self) -> None:
         """Load the last processed timestamp from MongoDB."""
         if self.meta_collection is None:
@@ -92,8 +119,9 @@ class PhotoProcessor:
         except PyMongoError as e:
             logger.error("Failed to update meta state: %s", e)
 
+    # --- Main processing ---
     def process_photos(self) -> None:
-        """Process new photos from the main collection and store embeddings."""
+        """Process new photos, extract embeddings, match known faces, and store results."""
         main_collection = self.connect_to_mongodb(MONGO_DB, MONGO_COLLECTION)
         face_collection = self.connect_to_mongodb(MONGO_DB, FACE_COLLECTION)
 
@@ -122,9 +150,25 @@ class PhotoProcessor:
                 if face_count == 0:
                     continue
 
+                # --- Match against known faces ---
+                matched_names: List[str] = []
+                if "face_embedding" in embeddings and self.known_faces:
+                    current_emb = np.frombuffer(
+                        embeddings["face_embedding"], np.float32
+                    ).reshape(1, -1)
+                    for name, known_emb in self.known_faces.items():
+                        similarity = cosine_similarity(
+                            current_emb, known_emb.reshape(1, -1)
+                        )[0][0]
+                        if similarity > 0.85:  # adjust threshold
+                            matched_names.append(name)
+                            logger.info(
+                                f"✅ Match found in '{photo.get('filename')}': {name} (similarity={similarity:.3f})"
+                            )
+
                 document = {
                     "filename": photo.get("filename", ""),
-                    "data": image_data,  # Stored in DB, not logged
+                    "data": image_data,
                     "search_embeddings": embeddings,
                     "s3_file_url": photo.get("s3_file_url", ""),
                     "size": photo.get("size", 0),
@@ -132,14 +176,16 @@ class PhotoProcessor:
                     "camera_location": photo.get("camera_location", ""),
                     "has_faces": True,
                     "face_count": face_count,
+                    "matched_persons": matched_names,
                     "processing_timestamp": time.time(),
                 }
 
                 face_collection.insert_one(document)
                 logger.info(
-                    "Processed and stored photo '%s' with %d faces.",
+                    "Processed and stored photo '%s' with %d faces. Matches: %s",
                     photo.get("filename"),
                     face_count,
+                    matched_names or "None",
                 )
 
                 # Update latest processed timestamp
@@ -163,6 +209,7 @@ class PhotoProcessor:
         # Cleanup old data
         self.delete_old_faces(face_collection)
 
+    # --- Cleanup ---
     def delete_old_faces(self, face_collection: Collection) -> None:
         """Delete old face documents from the collection."""
         try:
