@@ -20,6 +20,7 @@ jobs:
           host: ${{ secrets.VM_FACEDETECTION_HOST }}
           username: ${{ secrets.VM_FACEDETECTION_USER }}
           key: ${{ secrets.VM_FACEDETECTION_SSH_KEY }}
+          timeout: 1200s
           script: |
             echo "Pulling and redeploying nill2/face_detection:latest..."
             docker pull nill2/face_detection:latest
