@@ -2,11 +2,11 @@ name: Deploy to Oracle VM (Face Detection)
 
 on:
   workflow_run:
-    workflows: ["Python application"] # must match your build workflow name
+    workflows: ["ci:publish docker image"] # must match your build workflow name
     branches: [main]
     types:
       - completed
-  workflow_dispatch: # optional manual trigger for redeploy description: "Manually trigger deployment to Oracle VM"
+  workflow_dispatch: # optional manual trigger for redeploy
 
 jobs:
   deploy:
@@ -23,6 +23,9 @@ jobs:
           timeout: 1800s
           command_timeout: 1800s
           script: |
+            echo "Waiting for image to be available..."
+            sleep 30
+
             echo "Pulling and redeploying nill2/face_detection:latest..."
             docker pull nill2/face_detection:latest
 
