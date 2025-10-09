@@ -1,0 +1,53 @@
+name: Deploy to Oracle VM (Face Detection)
+
+on:
+  workflow_run:
+    workflows: ["Python application"] # must match your build workflow name
+    branches: [main]
+    types:
+      - completed
+  workflow_dispatch: # optional manual trigger for redeploy
+    description: "Manually trigger deployment to Oracle VM"
+
+jobs:
+  deploy:
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy updated container to Oracle VM
+        uses: appleboy/ssh-action@v1.1.0
+        with:
+          host: ${{ secrets.VM_FACEDETECTION_HOST }}
+          username: ${{ secrets.VM_FACEDETECTION_USER }}
+          key: ${{ secrets.VM_FACEDETECTION_SSH_KEY }}
+          script: |
+            echo "Pulling and redeploying nill2/face_detection:latest..."
+            docker pull nill2/face_detection:latest
+
+            echo "Stopping old container..."
+            docker stop face_detection || true
+            docker rm face_detection || true
+
+            echo "Starting new container..."
+            docker run -d \
+              --name face_detection \
+              --memory="900m" \
+              --memory-swap="1.5g" \
+              --cpus="0.9" \
+              --restart=always \
+              -e MONGO_HOST="${{ secrets.MONGO_HOST }}" \
+              -e MONGO_PORT="${{ secrets.MONGO_PORT }}" \
+              -e MONGO_DB="${{ secrets.MONGO_DB }}" \
+              -e MONGO_COLLECTION="${{ secrets.MONGO_COLLECTION }}" \
+              -e FACE_COLLECTION="${{ secrets.FACE_COLLECTION }}" \
+              -e FTP_HOST="0.0.0.0" \
+              -e FTP_PORT="${{ secrets.FTP_PORT }}" \
+              -e FTP_USER="${{ secrets.FTP_USER }}" \
+              -e FTP_PASS="${{ secrets.FTP_PASSWORD }}" \
+              -e FACES_HISTORY="${{ secrets.FACES_HISTORY }}" \
+              -p 8080:8080 \
+              nill2/face_detection:latest
+
+            echo "✅ Deployment complete! Cleaning up old images..."
+            docker image prune -f
