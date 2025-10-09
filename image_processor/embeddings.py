@@ -14,7 +14,7 @@ class EmbeddingEngine:
     """Unified face embedding engine using YOLOv8-face."""
 
     def __init__(self, model_path: str = "yolov8n-face.pt") -> None:
-        """Load YOLOv8-face model immediately."""
+        """Load YOLOv8-face model."""
         try:
             models_dir = Path(__file__).resolve().parent / "models"
             models_dir.mkdir(parents=True, exist_ok=True)
@@ -58,23 +58,28 @@ class EmbeddingEngine:
                 logger.warning("Invalid image data.")
                 return embeddings
 
+            h_img, w_img = img.shape[:2]
+
             results = self.model(img, verbose=False)
             if not results or not results[0].boxes:
                 embeddings["face_count"] = np.array([0], dtype=np.float32).tobytes()
                 return embeddings
 
-            boxes = results[0].boxes.xywh.cpu().numpy()
             faces = []
-            for x, y, w, h in boxes:
-                x1, y1, x2, y2 = (
-                    int(x - w / 2),
-                    int(y - h / 2),
-                    int(x + w / 2),
-                    int(y + h / 2),
-                )
-                face = img[y1:y2, x1:x2]
-                if face.size > 0:
-                    faces.append(cv2.resize(face, (64, 64)))
+            for box in results[0].boxes.xyxy.cpu().numpy():
+                x1, y1, x2, y2 = map(int, box[:4])
+                x1, y1 = max(0, x1), max(0, y1)
+                x2, y2 = min(w_img, x2), min(h_img, y2)
+
+                if x2 <= x1 or y2 <= y1:
+                    continue
+
+                face_crop = img[y1:y2, x1:x2]
+                if face_crop is None or face_crop.size == 0:
+                    continue
+
+                resized = cv2.resize(face_crop, (64, 64))
+                faces.append(resized)
 
             if not faces:
                 embeddings["face_count"] = np.array([0], dtype=np.float32).tobytes()
@@ -87,6 +92,7 @@ class EmbeddingEngine:
                 [len(faces_np)], dtype=np.float32
             ).tobytes()
 
+            logger.info("✅ Generated embeddings for %d face(s).", len(faces_np))
             return embeddings
 
         except Exception as error:
