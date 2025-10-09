@@ -43,18 +43,18 @@ embeddings = engine.generate_face_embeddings(image_bytes)
 logger.info(f"🔍 Raw embeddings keys: {list(embeddings.keys())}")
 
 # Handle either string or bytes keys
-key = None
+KEY_EMBEDDING = None
 if "face_embedding" in embeddings:
-    key = "face_embedding"
+    KEY_EMBEDDING = "face_embedding"
 elif b"face_embedding" in embeddings:
-    key = b"face_embedding"
+    KEY_EMBEDDING = b"face_embedding"
 
-if key is None:
+if KEY_EMBEDDING is None:
     raise ValueError(
         "No face embedding found in the test image. (Check path or YOLO output)"
     )
 
-embedding_bytes = embeddings[key]
+embedding_bytes = embeddings[KEY_EMBEDDING]
 face_embedding = np.frombuffer(embedding_bytes, dtype=np.float32).tolist()
 
 
