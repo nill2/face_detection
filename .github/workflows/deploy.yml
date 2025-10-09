@@ -6,8 +6,7 @@ on:
     branches: [main]
     types:
       - completed
-  workflow_dispatch: # optional manual trigger for redeploy
-    description: "Manually trigger deployment to Oracle VM"
+  workflow_dispatch: # optional manual trigger for redeploy description: "Manually trigger deployment to Oracle VM"
 
 jobs:
   deploy:
@@ -21,6 +20,8 @@ jobs:
           host: ${{ secrets.VM_FACEDETECTION_HOST }}
           username: ${{ secrets.VM_FACEDETECTION_USER }}
           key: ${{ secrets.VM_FACEDETECTION_SSH_KEY }}
+          timeout: 1800s
+          command_timeout: 1800s
           script: |
             echo "Pulling and redeploying nill2/face_detection:latest..."
             docker pull nill2/face_detection:latest
