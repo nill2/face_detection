@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 from ultralytics import YOLO
 import cv2
-from typing import Dict
+from typing import Any, Dict
 import uuid
 
 logger = logging.getLogger(__name__)
@@ -43,9 +43,9 @@ class EmbeddingEngine:
             logger.error("Failed to load YOLO model: %s", error)
             self.model = None
 
-    def generate_face_embeddings(self, image_data: bytes) -> Dict[str, bytes]:
+    def generate_face_embeddings(self, image_data: bytes) -> Dict[str, Any]:
         """Detect faces, generate embeddings, and save annotated image with rectangles."""
-        embeddings: Dict[str, bytes] = {}
+        embeddings: Dict[str, Any] = {}
 
         if self.model is None:
             logger.error("YOLO model not available.")
@@ -94,10 +94,8 @@ class EmbeddingEngine:
             # Compute lightweight embedding
             faces_np = np.stack(faces)
             face_embedding = faces_np.mean(axis=(0, 1, 2)).astype(np.float32)
-            embeddings["face_embedding"] = face_embedding.tobytes()
-            embeddings["face_count"] = np.array(
-                [len(faces_np)], dtype=np.float32
-            ).tobytes()
+            embeddings["face_embedding"] = face_embedding.tolist()
+            embeddings["face_count"] = len(faces_np)
 
             # Save annotated image for reference
             annotated_dir = Path("/app/processed_faces")
