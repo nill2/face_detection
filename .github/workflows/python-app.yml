@@ -63,8 +63,8 @@ jobs:
           FTP_USER: ${{ secrets.FTP_USER }}
           FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
           FTP_PORT: ${{ secrets.FTP_PORT }}
-          AWS_SECRET_KEY: ${{ secrets.AWS_SECRET_KEY }}
-          AWS_ACCESS_KEY: ${{ secrets.AWS_ACCESS_KEY }}
+#          AWS_SECRET_KEY: ${{ secrets.AWS_SECRET_KEY }}
+#          AWS_ACCESS_KEY: ${{ secrets.AWS_ACCESS_KEY }}
         run: |
           cd $CurrentDirectory
           python ./tests/setuptstmongo.py

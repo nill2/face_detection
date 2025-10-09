@@ -3,3 +3,4 @@ pylint
 astroid
 types-requests
 wrapt
+opencv-python-headless
