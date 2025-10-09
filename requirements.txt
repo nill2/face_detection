@@ -1,6 +1,7 @@
-pytest
-pylint
-astroid
-types-requests
-wrapt
+pymongo
+ultralytics
 opencv-python-headless
+numpy
+scikit-learn
+requests
+psutil

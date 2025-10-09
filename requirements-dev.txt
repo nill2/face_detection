@@ -1,5 +1,5 @@
 pytest
 pylint
 astroid
-types-requests
 wrapt
+types-requests
