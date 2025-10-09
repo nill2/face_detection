@@ -27,7 +27,7 @@ collection = db[KNOWN_FACES_COLLECTION]
 engine = EmbeddingEngine()
 logger.info("YOLOv8-face model loaded successfully.")
 
-TEST_IMAGE_PATH = "tests/test.jpg"  # adjust if needed
+TEST_IMAGE_PATH = "tests/test_dima.jpg"  # adjust if needed
 
 # Read file as bytes
 if not os.path.exists(TEST_IMAGE_PATH):
@@ -70,7 +70,7 @@ logger.info("✅ Found 3-D face embedding.")
 
 # --- Prepare and insert document ---
 document = {
-    "name": "Danil",
+    "name": "Dima",
     "embedding": face_embedding,
 }
 
@@ -79,7 +79,7 @@ logger.info(f"Writing known face to db={db.name}, collection={collection.name}")
 insert_result = collection.insert_one(document)
 logger.info(f"✅ Inserted document with _id={insert_result.inserted_id}")
 logger.info(
-    f"✅ Registered known face for 'Danil' in collection '{KNOWN_FACES_COLLECTION}'."
+    f"✅ Registered known face for 'Dima' in collection '{KNOWN_FACES_COLLECTION}'."
 )
 
 # --- Optional verification ---

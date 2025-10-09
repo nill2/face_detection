@@ -1,7 +1,13 @@
-pymongo
-ultralytics
-opencv-python-headless
+# Core dependencies
 numpy
-scikit-learn
-requests
+opencv-python-headless
 psutil
+requests
+flask
+
+# Machine learning / AI
+ultralytics
+scikit-learn
+
+# Database
+pymongo
