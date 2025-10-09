@@ -71,9 +71,9 @@ class PhotoProcessor:
     def load_known_faces(self) -> Dict[str, np.ndarray]:
         """Load all known face embeddings from MongoDB."""
         known: Dict[str, np.ndarray] = {}
-        if not self.known_faces_collection:
-            logger.warning("⚠️ Known faces collection not available.")
-            return known
+        if self.known_faces_collection is None:
+            logger.warning("No known_faces_collection available.")
+            return {}
 
         try:
             for doc in self.known_faces_collection.find({}):
