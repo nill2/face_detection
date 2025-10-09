@@ -49,4 +49,5 @@ jobs:
               -p 8080:8080 \
               nill2/face_detection:latest
 
-            echo "✅ Deployment complete!"
+            echo "✅ Deployment complete! Cleaning up old images..."
+            docker image prune -f
