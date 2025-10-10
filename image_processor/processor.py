@@ -8,7 +8,8 @@ from pymongo import MongoClient, ASCENDING
 from pymongo.errors import ConnectionFailure, PyMongoError
 from pymongo.collection import Collection
 import numpy as np
-from sklearn.metrics.pairwise import cosine_similarity
+
+# from sklearn.metrics.pairwise import cosine_similarity
 from flask import Flask, jsonify, Response
 import cv2
 import warnings
@@ -347,10 +348,14 @@ class PhotoProcessor:
                     embeddings["face_embedding"], dtype=np.float32
                 ).reshape(1, -1)
                 for name, known_emb in self.known_faces.items():
-                    similarity = cosine_similarity(
-                        current_emb, known_emb.reshape(1, -1)
-                    )[0][0]
-                    if similarity > 0.85:
+                    # Normalize both embeddings
+                    current_norm = current_emb / np.linalg.norm(current_emb)
+                    known_norm = known_emb / np.linalg.norm(known_emb)
+                    similarity = float(np.dot(current_norm, known_norm.T))
+                    logger.debug("Sim(%s, %s) = %.3f", filename, name, similarity)
+
+                    if similarity > 0.65:  # relax threshold for robustness
+                        # if similarity > 0.85:
                         matched_names.append(name)
                         logger.info(
                             "✅ Match found in '%s': %s (sim=%.3f)",

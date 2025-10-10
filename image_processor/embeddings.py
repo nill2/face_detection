@@ -1,4 +1,4 @@
-"""Lightweight embedding engine using YOLO for face detection, embedding extraction, and annotated output."""
+"""Lightweight embedding engine using YOLO for face detection and a pretrained model for face embeddings."""
 
 import logging
 from pathlib import Path
@@ -6,17 +6,17 @@ import numpy as np
 from ultralytics import YOLO
 import cv2
 from typing import Any, Dict
-
-# import uuid
+from facenet_pytorch import InceptionResnetV1
+import torch
 
 logger = logging.getLogger(__name__)
 
 
 class EmbeddingEngine:
-    """Face embedding engine using YOLOv8-face."""
+    """Face embedding engine using YOLOv8-face for detection and Facenet for embeddings."""
 
     def __init__(self, model_path: str = "yolov8n-face.pt") -> None:
-        """Load YOLOv8-face model."""
+        """Load YOLOv8-face and Facenet models."""
         try:
             models_dir = Path(__file__).resolve().parent / "models"
             models_dir.mkdir(parents=True, exist_ok=True)
@@ -37,22 +37,26 @@ class EmbeddingEngine:
                         file.write(chunk)
                 logger.info("Model downloaded to %s", local_model_path)
 
+            # YOLO for detection
             self.model = YOLO(str(local_model_path))
-            logger.info("YOLOv8-face model loaded successfully.")
+            # Facenet for embeddings
+            self.embedding_model = InceptionResnetV1(pretrained="vggface2").eval()
+
+            logger.info("YOLOv8-face + Facenet models loaded successfully.")
         except Exception as error:
-            logger.error("Failed to load YOLO model: %s", error)
+            logger.error("Failed to load models: %s", error)
             self.model = None
+            self.embedding_model = None
 
     def generate_face_embeddings(self, image_data: bytes) -> Dict[str, Any]:
-        """Detect faces, generate embeddings, and return annotated image bytes."""
+        """Detect faces and generate 512-dim embeddings."""
         embeddings: Dict[str, Any] = {}
 
-        if self.model is None:
-            logger.error("YOLO model not available.")
+        if self.model is None or self.embedding_model is None:
+            logger.error("Models not available.")
             return embeddings
 
         try:
-            # Decode image
             np_img = np.frombuffer(image_data, np.uint8)
             img = cv2.imdecode(np_img, cv2.IMREAD_COLOR)
             if img is None:
@@ -74,31 +78,35 @@ class EmbeddingEngine:
                 if x2 <= x1 or y2 <= y1:
                     continue
 
-                # Draw rectangle
                 cv2.rectangle(img, (x1, y1), (x2, y2), (0, 0, 255), 2)
                 face_crop = img[y1:y2, x1:x2]
                 if face_crop is None or face_crop.size == 0:
                     continue
 
-                resized = cv2.resize(face_crop, (64, 64))
-                faces.append(resized)
+                resized = cv2.resize(face_crop, (160, 160))
+                # Preprocess for Facenet
+                tensor = (
+                    torch.tensor(resized).permute(2, 0, 1).unsqueeze(0).float() / 255.0
+                )
+                emb = self.embedding_model(tensor).detach().numpy()[0]
+                faces.append(emb)
 
             if not faces:
                 embeddings["face_count"] = 0
                 return embeddings
 
-            faces_np = np.stack(faces)
-            face_embedding = faces_np.mean(axis=(0, 1, 2)).astype(np.float32)
-            embeddings["face_embedding"] = face_embedding.tolist()
-            embeddings["face_count"] = len(faces_np)
+            embeddings["face_embedding"] = (
+                np.mean(faces, axis=0).astype(np.float32).tolist()
+            )
+            embeddings["face_count"] = len(faces)
 
-            # Encode annotated image for Mongo
             _, annotated_bytes = cv2.imencode(".jpg", img)
             embeddings["annotated_bytes"] = annotated_bytes.tobytes()
 
             logger.info(
-                "✅ Generated embeddings for %d face(s). Annotated image ready.",
-                len(faces_np),
+                "✅ Generated %d embedding(s) of length %d.",
+                len(faces),
+                len(embeddings["face_embedding"]),
             )
             return embeddings
 
