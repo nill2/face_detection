@@ -18,3 +18,14 @@ FACES_HISTORY_DAYS = int(os.getenv("FACES_HISTORY_DAYS", "30"))
 
 # Face detection model (YOLOv8n-face by default)
 FACE_DETECTION_MODEL = os.getenv("FACE_DETECTION_MODEL", "yolov8n-face.pt")
+
+# Whether to run OpenCV face detection before embeddings
+# True = use OpenCV prefilter; False = embeddings handle all images directly
+USE_OPENCV_PREFILTER = True
+
+# Minimum confidence threshold for embeddings-based detection (if used)
+EMBEDDING_CONFIDENCE_THRESHOLD = 0.6
+
+# === Face Detection Settings ===
+# Path to OpenCV Haar Cascade XML file (used for face detection)
+OPENCV_CASCADE_PATH = "haarcascade_frontalface_default.xml"
