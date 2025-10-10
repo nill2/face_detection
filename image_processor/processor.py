@@ -60,7 +60,7 @@ class PhotoProcessor:
     """Unified photo processor using OpenCV prefilter + YOLO embeddings for faces."""
 
     def __init__(self) -> None:
-        """Initialize the PhotoProcessor."""
+        """Initialize the PhotoProcessor, load metadata and known faces."""
         self.latest_processed_date: int = 0
         self.embedding_engine = EmbeddingEngine()
 
@@ -163,7 +163,7 @@ class PhotoProcessor:
         except PyMongoError:
             processed_files = set()
 
-        # --- Fetch new unprocessed photos ---
+        # --- Fetch new photos newer than last processed ---
         query = {
             "filename": {"$nin": list(processed_files)},
             "date": {"$gt": self.latest_processed_date},
@@ -233,7 +233,7 @@ class PhotoProcessor:
                 logger.error(f"MongoDB error while inserting '{filename}': {e}")
                 continue
 
-            # Update latest processed timestamp
+            # --- Update last processed timestamp ---
             photo_date = photo.get("date", 0)
             if isinstance(photo_date, datetime):
                 photo_ts = int(photo_date.timestamp())
@@ -241,6 +241,7 @@ class PhotoProcessor:
                 photo_ts = int(photo_date)
             self.latest_processed_date = max(photo_ts, self.latest_processed_date)
 
+        # Save the latest processed date after all photos
         self.save_last_processed_date()
         self.delete_old_faces(face_collection)
 
