@@ -8,6 +8,7 @@ flask
 # Machine learning / AI
 ultralytics
 scikit-learn
+facenet-pytorch
 
 # Database
 pymongo
