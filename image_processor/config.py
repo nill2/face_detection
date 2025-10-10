@@ -5,8 +5,8 @@ import os
 # MongoDB configuration
 MONGO_HOST = os.getenv("MONGO_HOST", "localhost")
 MONGO_PORT = int(os.getenv("MONGO_PORT", "27017"))
-MONGO_DB = os.getenv("MONGO_DB", "photos")
-MONGO_COLLECTION = os.getenv("MONGO_COLLECTION", "images")
+MONGO_DB = os.getenv("MONGO_DB", "nill-home")
+MONGO_COLLECTION = os.getenv("MONGO_COLLECTION", "nill-home-photos")
 FACE_COLLECTION = os.getenv("FACE_COLLECTION", "nill-home-faces")
 KNOWN_FACES_COLLECTION = os.getenv("KNOWN_FACES_COLLECTION", "nill-known-faces")
 
