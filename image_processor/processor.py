@@ -2,7 +2,7 @@
 
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any, Tuple, List
 from pymongo import MongoClient, ASCENDING
 from pymongo.errors import ConnectionFailure, PyMongoError
@@ -61,12 +61,12 @@ class PhotoProcessor:
 
     def __init__(self) -> None:
         """Initialize the PhotoProcessor, load metadata and known faces."""
-        self.latest_processed_date: int = 0
+        self.latest_processed_date: Optional[datetime] = None
         self.embedding_engine = EmbeddingEngine()
 
-        # Meta collection for storing last processed timestamp
+        # Use dedicated metadata collection
         self.meta_collection: Optional[Collection] = self.connect_to_mongodb(
-            MONGO_DB, FACE_COLLECTION + "_meta"
+            MONGO_DB, "nill-home-metadata"
         )
         self.load_last_processed_date()
 
@@ -116,22 +116,24 @@ class PhotoProcessor:
         if self.meta_collection is None:
             logger.warning("Meta collection unavailable, starting from scratch.")
             return
+
         try:
             state = self.meta_collection.find_one({"_id": "latest_processed_state"})
-            if state:
-                self.latest_processed_date = int(state.get("latest_date", 0))
+            if state and "latest_date" in state:
+                self.latest_processed_date = state["latest_date"]
                 logger.info(
-                    "Resuming from last processed timestamp: %d",
-                    self.latest_processed_date,
+                    "Resuming from last processed date: %s", self.latest_processed_date
                 )
             else:
+                self.latest_processed_date = datetime.fromtimestamp(0, tz=timezone.utc)
                 logger.info("No previous state found, starting fresh.")
         except PyMongoError as e:
             logger.error("Failed to load meta state: %s", e)
+            self.latest_processed_date = datetime.fromtimestamp(0, tz=timezone.utc)
 
     def save_last_processed_date(self) -> None:
         """Save the last processed timestamp to MongoDB."""
-        if self.meta_collection is None:
+        if self.meta_collection is None or self.latest_processed_date is None:
             return
         try:
             self.meta_collection.update_one(
@@ -139,8 +141,8 @@ class PhotoProcessor:
                 {"$set": {"latest_date": self.latest_processed_date}},
                 upsert=True,
             )
-            logger.debug(
-                "Saved last processed timestamp: %d", self.latest_processed_date
+            logger.info(
+                "💾 Updated last processed date to: %s", self.latest_processed_date
             )
         except PyMongoError as e:
             logger.error("Failed to update meta state: %s", e)
@@ -163,13 +165,19 @@ class PhotoProcessor:
         except PyMongoError:
             processed_files = set()
 
-        # --- Fetch new photos newer than last processed ---
-        query = {
-            "filename": {"$nin": list(processed_files)},
-            "date": {"$gt": self.latest_processed_date},
-        }
+        # --- Fetch new unprocessed photos ---
+        query: Dict[str, Any] = {"filename": {"$nin": list(processed_files)}}
+        if self.latest_processed_date:
+            query["date"] = {"$gt": self.latest_processed_date}
+
         photos = list(main_collection.find(query).sort("date", ASCENDING))
-        logger.info("Found %d new unprocessed photos.", len(photos))
+        logger.info(
+            "Found %d new unprocessed photos since %s",
+            len(photos),
+            self.latest_processed_date,
+        )
+
+        newest_date_seen = self.latest_processed_date
 
         for photo in photos:
             filename = photo.get("filename", "unknown")
@@ -221,7 +229,7 @@ class PhotoProcessor:
                 "has_faces": True,
                 "face_count": embeddings.get("face_count", 0),
                 "matched_persons": matched_names,
-                "processing_timestamp": time.time(),
+                "processing_timestamp": datetime.now(timezone.utc),
             }
 
             try:
@@ -233,25 +241,31 @@ class PhotoProcessor:
                 logger.error(f"MongoDB error while inserting '{filename}': {e}")
                 continue
 
-            # --- Update last processed timestamp ---
-            photo_date = photo.get("date", 0)
-            if isinstance(photo_date, datetime):
-                photo_ts = int(photo_date.timestamp())
-            else:
-                photo_ts = int(photo_date)
-            self.latest_processed_date = max(photo_ts, self.latest_processed_date)
+            # Update latest processed timestamp
+            photo_date = photo.get("date")
+            if isinstance(photo_date, (int, float)):
+                photo_date = datetime.fromtimestamp(photo_date, tz=timezone.utc)
 
-        # Save the latest processed date after all photos
-        self.save_last_processed_date()
+            if isinstance(photo_date, datetime):
+                if newest_date_seen is None or photo_date > newest_date_seen:
+                    newest_date_seen = photo_date
+
+        # After processing all photos, persist watermark
+        if newest_date_seen and newest_date_seen != self.latest_processed_date:
+            self.latest_processed_date = newest_date_seen
+            self.save_last_processed_date()
+
         self.delete_old_faces(face_collection)
 
     # --- Cleanup ---
     def delete_old_faces(self, face_collection: Collection) -> None:
         """Delete old face documents from the collection."""
         try:
-            threshold = time.time() - (FACES_HISTORY_DAYS * 86400)
+            threshold = datetime.now(timezone.utc).timestamp() - (
+                FACES_HISTORY_DAYS * 86400
+            )
             result = face_collection.delete_many({"date": {"$lt": threshold}})
-            logger.info("Deleted %d old records.", result.deleted_count)
+            logger.info("🧹 Deleted %d old records.", result.deleted_count)
         except PyMongoError as e:
             logger.error("Error deleting old records: %s", e)
 
