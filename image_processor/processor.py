@@ -3,7 +3,7 @@
 import logging
 import time
 from datetime import datetime, timezone
-from typing import Optional, Dict, Any, Tuple, List
+from typing import Optional, Dict, Any, Tuple
 from pymongo import MongoClient, ASCENDING
 from pymongo.errors import ConnectionFailure, PyMongoError
 from pymongo.collection import Collection
@@ -61,10 +61,11 @@ class PhotoProcessor:
 
     def __init__(self) -> None:
         """Initialize the PhotoProcessor, load metadata and known faces."""
-        self.latest_processed_date: Optional[datetime] = None
+        # numeric seconds-since-epoch
+        self.latest_processed_date: float = 0.0
         self.embedding_engine = EmbeddingEngine()
 
-        # Use dedicated metadata collection
+        # Metadata collection for tracking last processed timestamp
         self.meta_collection: Optional[Collection] = self.connect_to_mongodb(
             MONGO_DB, "nill-home-metadata"
         )
@@ -82,13 +83,13 @@ class PhotoProcessor:
     ) -> Optional[Collection]:
         """Connect to MongoDB and return a collection handle."""
         try:
-            if MONGO_HOST.startswith("mongodb://") or MONGO_HOST.startswith(
-                "mongodb+srv://"
-            ):
+            if MONGO_HOST.startswith(("mongodb://", "mongodb+srv://")):
                 client = MongoClient(MONGO_HOST)
             else:
                 client = MongoClient(MONGO_HOST, MONGO_PORT)
-            return client[db_name][collection_name]
+            coll = client[db_name][collection_name]
+            logger.debug("Connected to collection: %s.%s", db_name, collection_name)
+            return coll
         except ConnectionFailure as e:
             logger.error("Failed to connect to MongoDB: %s", e)
             return None
@@ -111,45 +112,143 @@ class PhotoProcessor:
         return known
 
     # --- Meta state handling ---
+    def _parse_meta_value(self, val: Any) -> float:
+        """Robustly parse a stored latest_date value into a float timestamp (seconds)."""
+        if val is None:
+            return 0.0
+        # numeric
+        if isinstance(val, (int, float)):
+            return float(val)
+        # datetimes
+        if isinstance(val, datetime):
+            return float(val.replace(tzinfo=timezone.utc).timestamp())
+        # bson-like dict with $date or ISO string
+        if isinstance(val, dict) and ("$date" in val):
+            d = val["$date"]
+            if isinstance(d, (int, float)):
+                # milliseconds epoch?
+                # if it's obviously > 1e12 we assume ms
+                if d > 1e12:
+                    return float(d) / 1000.0
+                return float(d)
+            if isinstance(d, str):
+                try:
+                    # ISO string with Z
+                    iso = d.replace("Z", "+00:00")
+                    dt = datetime.fromisoformat(iso)
+                    return float(dt.replace(tzinfo=timezone.utc).timestamp())
+                except Exception:
+                    return 0.0
+        # string numeric or ISO
+        if isinstance(val, str):
+            try:
+                return float(val)
+            except Exception:
+                try:
+                    iso = val.replace("Z", "+00:00")
+                    dt = datetime.fromisoformat(iso)
+                    return float(dt.replace(tzinfo=timezone.utc).timestamp())
+                except Exception:
+                    return 0.0
+        return 0.0
+
     def load_last_processed_date(self) -> None:
-        """Load the last processed timestamp from MongoDB."""
+        """Load the last processed timestamp (float) from MongoDB."""
         if self.meta_collection is None:
             logger.warning("Meta collection unavailable, starting from scratch.")
+            self.latest_processed_date = 0.0
             return
 
         try:
             state = self.meta_collection.find_one({"_id": "latest_processed_state"})
             if state and "latest_date" in state:
-                self.latest_processed_date = state["latest_date"]
+                self.latest_processed_date = self._parse_meta_value(
+                    state["latest_date"]
+                )
                 logger.info(
-                    "Resuming from last processed date: %s", self.latest_processed_date
+                    "Resuming from last processed timestamp: %s (%s)",
+                    self.latest_processed_date,
+                    datetime.fromtimestamp(
+                        self.latest_processed_date, tz=timezone.utc
+                    ).isoformat(),
                 )
             else:
-                self.latest_processed_date = datetime.fromtimestamp(0, tz=timezone.utc)
+                self.latest_processed_date = 0.0
                 logger.info("No previous state found, starting fresh.")
         except PyMongoError as e:
             logger.error("Failed to load meta state: %s", e)
-            self.latest_processed_date = datetime.fromtimestamp(0, tz=timezone.utc)
+            self.latest_processed_date = 0.0
 
     def save_last_processed_date(self) -> None:
-        """Save the last processed timestamp to MongoDB."""
-        if self.meta_collection is None or self.latest_processed_date is None:
+        """Save the last processed timestamp (float) to MongoDB."""
+        if self.meta_collection is None:
+            logger.debug("Meta collection missing; not saving last processed date.")
             return
         try:
             self.meta_collection.update_one(
                 {"_id": "latest_processed_state"},
-                {"$set": {"latest_date": self.latest_processed_date}},
+                {"$set": {"latest_date": float(self.latest_processed_date)}},
                 upsert=True,
             )
             logger.info(
-                "💾 Updated last processed date to: %s", self.latest_processed_date
+                "💾 Updated last processed date to: %s (%s)",
+                self.latest_processed_date,
+                datetime.fromtimestamp(
+                    self.latest_processed_date, tz=timezone.utc
+                ).isoformat(),
             )
         except PyMongoError as e:
             logger.error("Failed to update meta state: %s", e)
 
+    # --- Old photo cleanup ---
+    def delete_old_faces(self, face_collection: Collection) -> None:
+        """Delete old face documents from the collection."""
+        try:
+            threshold = datetime.now(timezone.utc).timestamp() - (
+                FACES_HISTORY_DAYS * 86400
+            )
+            result = face_collection.delete_many({"date": {"$lt": threshold}})
+            logger.info("🧹 Deleted %d old records.", result.deleted_count)
+        except PyMongoError as e:
+            logger.error("Error deleting old records: %s", e)
+
+    # --- Helpers ---
+    def _extract_photo_timestamp(self, photo: Dict[str, Any]) -> float:
+        """
+        Try to extract a numeric timestamp (seconds since epoch) from the photo document.
+        Prefers numeric 'date' field, falls back to 'bsonTime' if present.
+        """
+        # 1) numeric 'date'
+        d = photo.get("date")
+        if isinstance(d, (int, float)):
+            return float(d)
+        if isinstance(d, datetime):
+            return float(d.replace(tzinfo=timezone.utc).timestamp())
+        # 2) bsonTime style: {"$date": "2025-10-10T12:17:32.584Z"} or {"$date": 163...}
+        bt = photo.get("bsonTime") or photo.get("bson_date") or photo.get("bson")
+        if isinstance(bt, dict) and "$date" in bt:
+            v = bt["$date"]
+            if isinstance(v, (int, float)):
+                # could be ms
+                if v > 1e12:
+                    return float(v) / 1000.0
+                return float(v)
+            if isinstance(v, str):
+                try:
+                    iso = v.replace("Z", "+00:00")
+                    dt = datetime.fromisoformat(iso)
+                    return float(dt.replace(tzinfo=timezone.utc).timestamp())
+                except Exception:
+                    return 0.0
+        # 3) maybe direct datetime stored
+        if isinstance(bt, datetime):
+            return float(bt.replace(tzinfo=timezone.utc).timestamp())
+        # nothing found
+        return 0.0
+
     # --- Main processing ---
     def process_photos(self) -> None:
-        """Process new photos, extract embeddings, match known faces, and store results."""
+        """Process only new photos, update last processed timestamp."""
         main_collection = self.connect_to_mongodb(MONGO_DB, MONGO_COLLECTION)
         face_collection = self.connect_to_mongodb(MONGO_DB, FACE_COLLECTION)
 
@@ -157,51 +256,92 @@ class PhotoProcessor:
             logger.error("MongoDB collections unavailable.")
             return
 
-        # --- Fetch filenames already processed ---
-        try:
-            processed_files = {
-                doc["filename"] for doc in face_collection.find({}, {"filename": 1})
-            }
-        except PyMongoError:
-            processed_files = set()
-
-        # --- Fetch new unprocessed photos ---
-        query: Dict[str, Any] = {"filename": {"$nin": list(processed_files)}}
-        if self.latest_processed_date:
-            query["date"] = {"$gt": self.latest_processed_date}
-
-        photos = list(main_collection.find(query).sort("date", ASCENDING))
         logger.info(
-            "Found %d new unprocessed photos since %s",
-            len(photos),
-            self.latest_processed_date,
+            "Processing collection: %s.%s",
+            main_collection.database.name,
+            main_collection.name,
+        )
+        logger.info(
+            "Storing faces into: %s.%s",
+            face_collection.database.name,
+            face_collection.name,
         )
 
-        newest_date_seen = self.latest_processed_date
+        last_date = float(self.latest_processed_date or 0.0)
+        logger.info(
+            "Last processed timestamp (numeric): %s (%s)",
+            last_date,
+            (
+                datetime.fromtimestamp(last_date, tz=timezone.utc).isoformat()
+                if last_date > 0
+                else "epoch"
+            ),
+        )
+
+        # Build robust query: either numeric 'date' > last_date or bsonTime > last_date
+        bson_cutoff = datetime.fromtimestamp(last_date, tz=timezone.utc)
+        query = {
+            "$or": [
+                {"date": {"$gt": last_date}},
+                {"bsonTime": {"$gt": bson_cutoff}},
+            ]
+        }
+
+        # fetch new photos sorted by date (fallback to bsonTime order)
+        try:
+            photos_cursor = main_collection.find(query).sort(
+                [("date", ASCENDING), ("bsonTime", ASCENDING)]
+            )
+        except PyMongoError as e:
+            logger.error("MongoDB query failed: %s", e)
+            return
+
+        photos = list(photos_cursor)
+        logger.info("Found %d new photos since %s", len(photos), last_date)
+
+        if not photos:
+            return
 
         for photo in photos:
             filename = photo.get("filename", "unknown")
+            photo_ts = self._extract_photo_timestamp(photo)
+
+            # Immediately advance latest_processed_date so we don't reprocess this doc again
+            if photo_ts > self.latest_processed_date:
+                self.latest_processed_date = photo_ts
+
+            logger.info(
+                "Processing photo '%s' (photo_ts=%s -> %s)",
+                filename,
+                photo_ts,
+                (
+                    datetime.fromtimestamp(photo_ts, tz=timezone.utc).isoformat()
+                    if photo_ts
+                    else "unknown"
+                ),
+            )
+
             image_data = photo.get("data")
             if not image_data:
-                logger.warning(f"⚠️ No image data in '{filename}', skipping.")
+                logger.warning("⚠️ No image data in '%s', skipping.", filename)
                 continue
 
-            # Step 1 — Optional OpenCV prefilter
-            if USE_OPENCV_PREFILTER:
-                if not detect_faces_opencv(image_data):
-                    logger.info(
-                        f"No faces detected by OpenCV in '{filename}', skipping YOLO."
-                    )
-                    continue
+            # Optional OpenCV prefilter
+            if USE_OPENCV_PREFILTER and not detect_faces_opencv(image_data):
+                logger.info(
+                    "No faces detected by OpenCV in '%s', skipping YOLO.", filename
+                )
+                # Note: latest_processed_date already advanced for this photo
+                continue
 
-            # Step 2 — YOLO embeddings
+            # YOLO embeddings
             embeddings = self.embedding_engine.generate_face_embeddings(image_data)
             if not embeddings or embeddings.get("face_count", 0) == 0:
-                logger.info(f"No faces confirmed by YOLO in '{filename}', skipping.")
+                logger.info("No faces confirmed by YOLO in '%s', skipping.", filename)
                 continue
 
-            # Step 3 — Known face matching
-            matched_names: List[str] = []
+            # Known face matching
+            matched_names = []
             if "face_embedding" in embeddings and self.known_faces:
                 current_emb = np.array(
                     embeddings["face_embedding"], dtype=np.float32
@@ -213,10 +353,12 @@ class PhotoProcessor:
                     if similarity > 0.85:
                         matched_names.append(name)
                         logger.info(
-                            f"✅ Match found in '{filename}': {name} (similarity={similarity:.3f})"
+                            "✅ Match found in '%s': %s (sim=%.3f)",
+                            filename,
+                            name,
+                            similarity,
                         )
 
-            # Step 4 — Build document
             annotated_bytes = embeddings.get("annotated_bytes")
             document = {
                 "filename": filename,
@@ -225,49 +367,31 @@ class PhotoProcessor:
                 "s3_file_url": photo.get("s3_file_url", ""),
                 "size": photo.get("size", 0),
                 "date": photo.get("date", 0),
+                "bsonTime": photo.get("bsonTime", None),
                 "camera_location": photo.get("camera_location", ""),
                 "has_faces": True,
                 "face_count": embeddings.get("face_count", 0),
                 "matched_persons": matched_names,
-                "processing_timestamp": datetime.now(timezone.utc),
+                "processing_timestamp": time.time(),
             }
 
             try:
                 face_collection.insert_one(document)
                 logger.info(
-                    f"Stored '{filename}' with {document['face_count']} faces. Matches: {matched_names or 'None'}"
+                    "Stored '%s' with %d faces. Matches: %s",
+                    filename,
+                    document["face_count"],
+                    matched_names or "None",
                 )
             except PyMongoError as e:
-                logger.error(f"MongoDB error while inserting '{filename}': {e}")
+                logger.error("MongoDB insert error for '%s': %s", filename, e)
+                # on insert failure we still keep the latest_processed_date advanced to avoid repeat
                 continue
 
-            # Update latest processed timestamp
-            photo_date = photo.get("date")
-            if isinstance(photo_date, (int, float)):
-                photo_date = datetime.fromtimestamp(photo_date, tz=timezone.utc)
-
-            if isinstance(photo_date, datetime):
-                if newest_date_seen is None or photo_date > newest_date_seen:
-                    newest_date_seen = photo_date
-
-        # After processing all photos, persist watermark
-        if newest_date_seen and newest_date_seen != self.latest_processed_date:
-            self.latest_processed_date = newest_date_seen
-            self.save_last_processed_date()
-
+        # Save the latest_processed_date after processing all photos
+        self.save_last_processed_date()
+        # cleanup old
         self.delete_old_faces(face_collection)
-
-    # --- Cleanup ---
-    def delete_old_faces(self, face_collection: Collection) -> None:
-        """Delete old face documents from the collection."""
-        try:
-            threshold = datetime.now(timezone.utc).timestamp() - (
-                FACES_HISTORY_DAYS * 86400
-            )
-            result = face_collection.delete_many({"date": {"$lt": threshold}})
-            logger.info("🧹 Deleted %d old records.", result.deleted_count)
-        except PyMongoError as e:
-            logger.error("Error deleting old records: %s", e)
 
 
 @app.route("/health", methods=["GET"])  # type: ignore[misc]
