@@ -4,7 +4,7 @@ import logging
 import time
 from datetime import datetime
 from typing import Optional, Dict, Any, Tuple, List
-from pymongo import MongoClient, DESCENDING
+from pymongo import MongoClient, ASCENDING
 from pymongo.errors import ConnectionFailure, PyMongoError
 from pymongo.collection import Collection
 import numpy as np
@@ -20,6 +20,7 @@ from .config import (
     MONGO_COLLECTION,
     FACE_COLLECTION,
     FACES_HISTORY_DAYS,
+    USE_OPENCV_PREFILTER,
 )
 from .embeddings import EmbeddingEngine
 
@@ -154,20 +155,21 @@ class PhotoProcessor:
             logger.error("MongoDB collections unavailable.")
             return
 
-        query_date = (
-            datetime.fromtimestamp(self.latest_processed_date)
-            if self.latest_processed_date > 0
-            else datetime.fromtimestamp(0)
-        )
-        query = {
-            "$or": [
-                {"date": {"$gt": self.latest_processed_date}},
-                {"date": {"$gt": query_date}},
-            ]
-        }
+        # --- Fetch filenames already processed ---
+        try:
+            processed_files = {
+                doc["filename"] for doc in face_collection.find({}, {"filename": 1})
+            }
+        except PyMongoError:
+            processed_files = set()
 
-        photos = list(main_collection.find(query).sort("date", DESCENDING))
-        logger.info("Found %d new photos to process.", len(photos))
+        # --- Fetch new unprocessed photos ---
+        query = {
+            "filename": {"$nin": list(processed_files)},
+            "date": {"$gt": self.latest_processed_date},
+        }
+        photos = list(main_collection.find(query).sort("date", ASCENDING))
+        logger.info("Found %d new unprocessed photos.", len(photos))
 
         for photo in photos:
             filename = photo.get("filename", "unknown")
@@ -176,12 +178,13 @@ class PhotoProcessor:
                 logger.warning(f"⚠️ No image data in '{filename}', skipping.")
                 continue
 
-            # Step 1 — OpenCV prefilter
-            if not detect_faces_opencv(image_data):
-                logger.info(
-                    f"No faces detected by OpenCV in '{filename}', skipping YOLO."
-                )
-                continue
+            # Step 1 — Optional OpenCV prefilter
+            if USE_OPENCV_PREFILTER:
+                if not detect_faces_opencv(image_data):
+                    logger.info(
+                        f"No faces detected by OpenCV in '{filename}', skipping YOLO."
+                    )
+                    continue
 
             # Step 2 — YOLO embeddings
             embeddings = self.embedding_engine.generate_face_embeddings(image_data)
@@ -228,8 +231,9 @@ class PhotoProcessor:
                 )
             except PyMongoError as e:
                 logger.error(f"MongoDB error while inserting '{filename}': {e}")
+                continue
 
-            # Update timestamp
+            # Update latest processed timestamp
             photo_date = photo.get("date", 0)
             if isinstance(photo_date, datetime):
                 photo_ts = int(photo_date.timestamp())
