@@ -6,6 +6,7 @@ from pymongo import MongoClient
 from sklearn.metrics.pairwise import cosine_similarity
 from image_processor.embeddings import EmbeddingEngine
 import base64
+import os
 
 # --- Setup logger ---
 logging.basicConfig(
@@ -14,7 +15,7 @@ logging.basicConfig(
 logger = logging.getLogger("manual_match_test")
 
 # --- MongoDB Configuration ---
-MONGO_URI = "mongodb+srv://appUser:qovkm123@cluster0.qfjxdop.mongodb.net/?retryWrites=true&w=majority"
+MONGO_URI = os.getenv("MONGO_HOST", "localhost")
 DB_NAME = "nill-home"
 KNOWN_COLLECTION = "nill-known-faces"
 CCTV_COLLECTION = "nill-home-faces"
