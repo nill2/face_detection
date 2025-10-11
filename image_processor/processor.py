@@ -354,7 +354,9 @@ class PhotoProcessor:
                     similarity = float(np.dot(current_norm, known_norm.T))
                     logger.debug("Sim(%s, %s) = %.3f", filename, name, similarity)
 
-                    if similarity > 0.65:  # relax threshold for robustness
+                    if (
+                        similarity > 0.51
+                    ):  # manual testing indicates its the optimal threshold
                         # if similarity > 0.85:
                         matched_names.append(name)
                         logger.info(

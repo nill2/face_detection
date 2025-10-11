@@ -33,7 +33,7 @@ logger.info("YOLOv8-face model loaded successfully.")
 
 # --- Path to known face image ---
 NAME = "Danil"
-IMAGE_PATH = "tests/test.jpg"  # adjust
+IMAGE_PATH = "tests/test.jpg"
 if not os.path.exists(IMAGE_PATH):
     raise FileNotFoundError(f"❌ Test image not found: {IMAGE_PATH}")
 
