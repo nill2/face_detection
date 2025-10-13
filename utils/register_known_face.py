@@ -1,9 +1,10 @@
-"""Register or update a known face in MongoDB using the same embedding engine as runtime."""
+"""Register or update a known face (with image) in MongoDB using the same embedding engine as runtime."""
 
 import os
 import numpy as np
 from dotenv import load_dotenv
 from pymongo import MongoClient
+from bson import Binary
 import logging
 from image_processor.embeddings import EmbeddingEngine
 
@@ -16,7 +17,6 @@ load_dotenv()
 MONGO_HOST = os.getenv("MONGO_HOST")
 MONGO_DB = os.getenv("MONGO_DB")
 KNOWN_FACES_COLLECTION = os.getenv("KNOWN_FACES_COLLECTION", "nill-known-faces")
-
 
 # --- Connect to MongoDB ---
 client = MongoClient(MONGO_HOST)
@@ -32,8 +32,8 @@ engine = EmbeddingEngine()
 logger.info("YOLOv8-face model loaded successfully.")
 
 # --- Path to known face image ---
-NAME = "Danil"
-IMAGE_PATH = "tests/test.jpg"
+NAME = "Dima"
+IMAGE_PATH = "tests/test_dima.jpg"
 if not os.path.exists(IMAGE_PATH):
     raise FileNotFoundError(f"❌ Test image not found: {IMAGE_PATH}")
 
@@ -55,10 +55,13 @@ embedding_vector = (
 
 logger.info(f"✅ Generated embedding vector of length {len(embedding_vector)}")
 
+# --- Prepare binary image data ---
+image_binary = Binary(image_bytes)
+
 # --- Upsert (update or insert) ---
 result = collection.update_one(
     {"name": NAME},
-    {"$set": {"embedding": embedding_vector}},
+    {"$set": {"embedding": embedding_vector, "data": image_binary}},
     upsert=True,
 )
 
