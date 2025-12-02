@@ -3,24 +3,23 @@
 import logging
 import time
 from datetime import datetime, timezone
-from typing import Optional, Dict, Any, Tuple
+from typing import Any, Dict, Optional, Tuple
 from pymongo import MongoClient, ASCENDING
 from pymongo.errors import ConnectionFailure, PyMongoError
 from pymongo.collection import Collection
 import numpy as np
 
-# from sklearn.metrics.pairwise import cosine_similarity
-from flask import Flask, jsonify, Response
+from flask import Flask, Response, jsonify
 import cv2
 import warnings
 
 from .config import (
-    MONGO_HOST,
-    MONGO_PORT,
-    MONGO_DB,
-    MONGO_COLLECTION,
     FACE_COLLECTION,
     FACES_HISTORY_DAYS,
+    MONGO_COLLECTION,
+    MONGO_DB,
+    MONGO_HOST,
+    MONGO_PORT,
     USE_OPENCV_PREFILTER,
 )
 from .embeddings import EmbeddingEngine
@@ -39,7 +38,10 @@ app = Flask(__name__)
 
 
 def detect_faces_opencv(image_data: bytes) -> bool:
-    """Quick prefilter using OpenCV to detect if faces are present."""
+    """Quick prefilter using OpenCV to detect if faces are present.
+
+    Returns True if OpenCV Haar cascade finds at least one face-like object.
+    """
     try:
         np_img = np.frombuffer(image_data, np.uint8)
         img = cv2.imdecode(np_img, cv2.IMREAD_COLOR)
@@ -48,9 +50,12 @@ def detect_faces_opencv(image_data: bytes) -> bool:
 
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         face_cascade = cv2.CascadeClassifier(
-            cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+            cv2.data.haarcascades + "haarcascade_frontalface_alt2.xml"
         )
-        faces = face_cascade.detectMultiScale(gray, 1.2, 4)
+        # Pass the image as first argument (previous bug: gray was not passed)
+        faces = face_cascade.detectMultiScale(
+            gray, scaleFactor=1.05, minNeighbors=12, minSize=(80, 80)
+        )
         return len(faces) > 0
     except Exception as e:
         logger.error("OpenCV face detection failed: %s", e)
@@ -357,7 +362,6 @@ class PhotoProcessor:
                     if (
                         similarity > 0.51
                     ):  # manual testing indicates its the optimal threshold
-                        # if similarity > 0.85:
                         matched_names.append(name)
                         logger.info(
                             "✅ Match found in '%s': %s (sim=%.3f)",
