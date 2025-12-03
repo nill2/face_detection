@@ -54,7 +54,7 @@ def detect_faces_opencv(image_data: bytes) -> bool:
         )
         # Pass the image as first argument (previous bug: gray was not passed)
         faces = face_cascade.detectMultiScale(
-            gray, scaleFactor=1.05, minNeighbors=12, minSize=(80, 80)
+            gray, scaleFactor=1.1, minNeighbors=8, minSize=(80, 80)
         )
         return len(faces) > 0
     except Exception as e:
