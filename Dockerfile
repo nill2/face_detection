@@ -64,8 +64,8 @@
   # ------------------------------
   # Health check (optional)
   # ------------------------------
-  HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
-    CMD curl -fs http://localhost:8080/health || exit 1
+  # HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
+  #   CMD curl -fs http://localhost:8080/health || exit 1
 
   # ------------------------------
   # Final CMD
