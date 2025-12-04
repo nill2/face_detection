@@ -24,7 +24,7 @@ FACE_DETECTION_MODEL = os.getenv("FACE_DETECTION_MODEL", "yolov8n-face.pt")
 USE_OPENCV_PREFILTER = True
 
 # Minimum confidence threshold for embeddings-based detection (if used)
-EMBEDDING_CONFIDENCE_THRESHOLD = 0.7
+EMBEDDING_CONFIDENCE_THRESHOLD = 0.3
 
 # === Face Detection Settings ===
 # Path to OpenCV Haar Cascade XML file (used for face detection)
