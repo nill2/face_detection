@@ -29,11 +29,11 @@ logger.info(f"🧩 Using collection: {collection.name}")
 
 # --- Initialize embedding engine ---
 engine = EmbeddingEngine()
-logger.info("YOLOv8-face model loaded successfully.")
+logger.info("YOLOv11s-face model loaded successfully.")
 
 # --- Path to known face image ---
-NAME = "Danil"
-IMAGE_PATH = "tests/test.jpg"
+NAME = "Dima"
+IMAGE_PATH = "tests/test_dima.jpg"
 if not os.path.exists(IMAGE_PATH):
     raise FileNotFoundError(f"❌ Test image not found: {IMAGE_PATH}")
 
