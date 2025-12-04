@@ -45,29 +45,36 @@ class EmbeddingEngine:
         try:
             models_dir = Path(__file__).resolve().parent / "models"
             models_dir.mkdir(parents=True, exist_ok=True)
-            local_model_path = models_dir / Path(model_path).name
+
+            # Correct filename from user.
+            local_model_path = models_dir / "yolov11s-face.pt"
+
+            # Correct download URL.
+            download_url = (
+                "https://github.com/YapaLab/yolo-face/releases/download/"
+                "v0.0.0/yolov11s-face.pt"
+            )
 
             if not local_model_path.exists():
                 import requests
 
-                logger.info("Downloading YOLOv8-s-face model...")
-                url = (
-                    "https://github.com/akanametov/yolov8-face/releases/download/"
-                    "v0.0.0/yolov8s-face.pt"
-                )
-                response = requests.get(url, stream=True, timeout=60)
+                logger.info("Downloading YOLOv11s-face model...")
+                response = requests.get(download_url, stream=True, timeout=60)
                 response.raise_for_status()
-                with open(local_model_path, "wb") as file:
-                    for chunk in response.iter_content(chunk_size=8192):
-                        file.write(chunk)
 
-            # Load YOLO model
+                with open(local_model_path, "wb") as f:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        f.write(chunk)
+
+                logger.info("YOLOv11s-face model downloaded.")
+
+            # Load YOLO model (this must succeed now)
             self.model = YOLO(str(local_model_path))
 
             # Load Facenet
             self.embedding_model = InceptionResnetV1(pretrained="vggface2").eval()
 
-            logger.info("YOLOv8-s-face + Facenet models loaded successfully.")
+            logger.info("YOLOv11s-face + Facenet loaded successfully.")
 
         except Exception as error:
             logger.error("Failed to load models: %s", error)
